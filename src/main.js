@@ -321,6 +321,18 @@ function createWorkspaceTree(files) {
   return root;
 }
 
+function collapseWorkspaceDirsByDefault(files) {
+  collapsedWorkspaceDirs.clear();
+  files.forEach((file) => {
+    const parts = (file.relative_path || file.name).split("/").filter(Boolean).slice(0, -1);
+    let current = "";
+    parts.forEach((part) => {
+      current = current ? `${current}/${part}` : part;
+      collapsedWorkspaceDirs.add(current);
+    });
+  });
+}
+
 function ensureWorkspaceDirExpanded(relativePath) {
   collapsedWorkspaceDirs.delete("");
   const parts = relativePath.split("/").filter(Boolean).slice(0, -1);
@@ -493,12 +505,12 @@ function renderWorkspaceFiles() {
 }
 
 function setWorkspace(payload) {
-  collapsedWorkspaceDirs.clear();
   workspace = {
     root: payload.root,
     name: payload.name,
     files: payload.files || [],
   };
+  collapseWorkspaceDirsByDefault(workspace.files);
   looseFiles = looseFiles.filter((file) => !isPathInsideRoot(file.path, workspace.root));
   renderWorkspaceFiles();
 }
