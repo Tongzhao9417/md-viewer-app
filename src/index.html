@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MD Viewer</title>
+    <link rel="stylesheet" href="themes.css" />
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="/main.js" defer></script>
+  </head>
+  <body data-theme="default">
+    <div id="tab-bar">
+      <div id="tab-list"></div>
+      <select id="theme-select"></select>
+      <button id="typography-btn" title="主题字号" aria-label="主题字号">Aa</button>
+      <div id="export-wrapper">
+        <button id="export-btn" disabled>导出 ▾</button>
+        <div id="export-menu" class="hidden">
+          <button data-format="html">导出 HTML</button>
+          <button data-format="docx">导出 DOCX</button>
+          <button data-format="print">打印 / PDF</button>
+        </div>
+      </div>
+    </div>
+    <div id="settings-backdrop" class="hidden">
+      <section id="typography-dialog" role="dialog" aria-modal="true" aria-labelledby="typography-title">
+        <header class="dialog-header">
+          <div>
+            <h2 id="typography-title">主题字号</h2>
+            <p id="typography-theme-name"></p>
+          </div>
+          <button id="typography-close" class="icon-button" aria-label="关闭">×</button>
+        </header>
+        <div class="scope-row">
+          <label><input id="typography-preview-enabled" type="checkbox" /> 预览</label>
+          <label><input id="typography-export-enabled" type="checkbox" /> DOCX</label>
+        </div>
+        <div id="typography-fields"></div>
+        <footer class="dialog-actions">
+          <button id="typography-reset" type="button">恢复默认</button>
+          <span class="dialog-spacer"></span>
+          <button id="typography-cancel" type="button">取消</button>
+          <button id="typography-save" type="button">保存</button>
+        </footer>
+      </section>
+    </div>
+    <div id="empty-state">
+      <div class="empty-icon">📄</div>
+      <p>拖拽 .md 文件到窗口打开</p>
+      <p class="hint">或通过右键菜单 "打开方式" 选择 MD Viewer</p>
+    </div>
+    <article id="markdown-content" class="markdown-body" style="display:none;"></article>
+  </body>
+</html>
