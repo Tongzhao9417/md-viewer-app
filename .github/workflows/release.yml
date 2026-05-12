@@ -24,14 +24,17 @@ jobs:
             platform: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             args: --target aarch64-apple-darwin --bundles dmg
+            artifact-name: md-viewer-macos-apple-silicon
           - name: macOS Intel
             platform: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
             args: --target x86_64-apple-darwin --bundles dmg
+            artifact-name: md-viewer-macos-intel
           - name: Windows
             platform: windows-latest
             rust-targets: ""
             args: --bundles nsis
+            artifact-name: md-viewer-windows
 
     runs-on: ${{ matrix.platform }}
 
@@ -74,4 +77,14 @@ jobs:
           releaseBody: See the assets below to download and install this version.
           releaseDraft: true
           prerelease: false
+          includeRelease: false
           args: ${{ matrix.args }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: |
+            src-tauri/target/**/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/nsis/*setup.exe
+          if-no-files-found: error
