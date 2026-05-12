@@ -69,6 +69,15 @@ fn read_md_file(path: &PathBuf) -> Result<FilePayload, String> {
     })
 }
 
+fn relative_path_string(root: &Path, path: &Path) -> String {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 #[tauri::command]
 fn get_initial_file(state: tauri::State<AppState>) -> Option<FilePayload> {
     let guard = state.current_file.lock().unwrap();
@@ -122,11 +131,7 @@ fn collect_markdown_files(
             continue;
         }
 
-        let relative = path
-            .strip_prefix(root)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
+        let relative = relative_path_string(root, &path);
         let name = path
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
@@ -161,11 +166,7 @@ fn list_markdown_files(path: String) -> Result<WorkspacePayload, String> {
     let mut files = Vec::new();
     if path_buf.is_file() {
         if !should_skip_file(&path_buf) && is_markdown_file(&path_buf) {
-            let relative = path_buf
-                .strip_prefix(&root)
-                .unwrap_or(&path_buf)
-                .to_string_lossy()
-                .to_string();
+            let relative = relative_path_string(&root, &path_buf);
             let name = path_buf
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())

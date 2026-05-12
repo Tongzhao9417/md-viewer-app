@@ -187,7 +187,7 @@ function setTitle(filePath) {
     document.title = "MD Viewer";
     return;
   }
-  const name = filePath.split("/").pop();
+  const name = getFileName(filePath);
   document.title = name + " — MD Viewer";
 }
 
@@ -201,26 +201,46 @@ function escapeHTML(value) {
 }
 
 function getFileName(path) {
-  return path ? path.split("/").pop() : "";
+  return path ? path.split(/[\\/]/).pop() : "";
 }
 
 function getBaseName(path) {
   if (!path) return "";
-  return path.split("/").filter(Boolean).pop() || path;
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
+function getPathParts(path) {
+  return String(path || "").split(/[\\/]/).filter(Boolean);
+}
+
+function normalizePathSeparators(path) {
+  return String(path || "").replace(/\\/g, "/");
 }
 
 function joinPath(base, relative) {
   if (!relative) return base;
-  return `${base.replace(/\/+$/, "")}/${relative.replace(/^\/+/, "")}`;
+  const separator = String(base || "").includes("\\") ? "\\" : "/";
+  const normalizedBase = String(base || "").replace(/[\\/]+$/, "");
+  const normalizedRelative = String(relative || "").replace(/^[\\/]+/, "").replace(/[\\/]/g, separator);
+  return `${normalizedBase}${separator}${normalizedRelative}`;
 }
 
 function isPathInsideRoot(path, root) {
-  return Boolean(path && root && (path === root || path.startsWith(`${root.replace(/\/+$/, "")}/`)));
+  const normalizedPath = normalizePathSeparators(path);
+  const normalizedRoot = normalizePathSeparators(root).replace(/\/+$/, "");
+  return Boolean(
+    normalizedPath &&
+      normalizedRoot &&
+      (normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)),
+  );
 }
 
 function getPathRelativeToRoot(path, root) {
-  const normalizedRoot = root.replace(/\/+$/, "");
-  return path.startsWith(`${normalizedRoot}/`) ? path.slice(normalizedRoot.length + 1) : getFileName(path);
+  const normalizedPath = normalizePathSeparators(path);
+  const normalizedRoot = normalizePathSeparators(root).replace(/\/+$/, "");
+  return normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : getFileName(path);
 }
 
 function clampSize(value, min, max) {
@@ -298,7 +318,7 @@ function createWorkspaceTree(files) {
   };
 
   files.forEach((file) => {
-    const parts = (file.relative_path || file.name).split("/").filter(Boolean);
+    const parts = getPathParts(file.relative_path || file.name);
     if (!parts.length) return;
 
     let node = root;
@@ -324,7 +344,7 @@ function createWorkspaceTree(files) {
 function collapseWorkspaceDirsByDefault(files) {
   collapsedWorkspaceDirs.clear();
   files.forEach((file) => {
-    const parts = (file.relative_path || file.name).split("/").filter(Boolean).slice(0, -1);
+    const parts = getPathParts(file.relative_path || file.name).slice(0, -1);
     let current = "";
     parts.forEach((part) => {
       current = current ? `${current}/${part}` : part;
@@ -335,7 +355,7 @@ function collapseWorkspaceDirsByDefault(files) {
 
 function ensureWorkspaceDirExpanded(relativePath) {
   collapsedWorkspaceDirs.delete("");
-  const parts = relativePath.split("/").filter(Boolean).slice(0, -1);
+  const parts = getPathParts(relativePath).slice(0, -1);
   let current = "";
   parts.forEach((part) => {
     current = current ? `${current}/${part}` : part;
@@ -879,7 +899,7 @@ function initContextMenus() {
 function getActiveFileName() {
   const tab = tabs.find((t) => t.id === activeTabId);
   if (!tab) return "document";
-  return tab.path.split("/").pop().replace(/\.[^.]+$/, "");
+  return getFileName(tab.path).replace(/\.[^.]+$/, "");
 }
 
 function getContentCSS() {
