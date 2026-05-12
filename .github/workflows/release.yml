@@ -77,7 +77,6 @@ jobs:
           releaseBody: See the assets below to download and install this version.
           releaseDraft: true
           prerelease: false
-          includeRelease: false
           args: ${{ matrix.args }}
 
       - name: Upload build artifact
