@@ -83,7 +83,18 @@ body.is-resizing-outline * {
   border-right: 1px solid #ddddd6;
 }
 
+#side-panel-drag-region {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 5;
+  height: 68px;
+}
+
 .panel-header {
+  position: relative;
+  z-index: 6;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -375,12 +386,29 @@ body.is-resizing-outline #outline-resizer::before {
 
 .outline-list {
   display: grid;
+  align-content: start;
   gap: 2px;
+  grid-auto-rows: max-content;
   min-height: 0;
   margin: 0;
   padding: 0;
   overflow: auto;
   list-style: none;
+}
+
+.outline-children {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  grid-auto-rows: max-content;
+  margin: 2px 0 2px 8px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid rgba(59, 111, 101, 0.12);
+  list-style: none;
+}
+
+.outline-children:empty {
+  display: none;
 }
 
 #sidebar-resizer {
@@ -439,18 +467,22 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   background: rgba(59, 111, 101, 0.06);
 }
 
-.outline-list li.active button {
+.outline-list li.active > button {
   color: #173f38;
   background: rgba(59, 111, 101, 0.1);
   box-shadow: inset 2px 0 0 var(--app-accent);
 }
 
-.outline-level-h2 button {
-  padding-left: 18px;
+.outline-level-h1 > button {
+  font-weight: 650;
 }
 
-.outline-level-h3 button {
-  padding-left: 28px;
+.outline-level-h4 > button,
+.outline-level-h5 > button,
+.outline-level-h6 > button {
+  min-height: 28px;
+  color: #6f746f;
+  font-size: 11px;
 }
 
 .outline-empty {
@@ -458,11 +490,43 @@ body.is-resizing-sidebar #sidebar-resizer::after {
 }
 
 #reader-pane {
+  position: relative;
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   background: var(--bg);
+}
+
+#back-to-top-btn {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: #24463f;
+  background: rgba(255, 255, 252, 0.92);
+  border: 1px solid rgba(59, 111, 101, 0.18);
+  border-radius: 50%;
+  box-shadow: 0 10px 26px rgba(52, 50, 44, 0.15);
+  font-size: 20px;
+  line-height: 1;
+  backdrop-filter: blur(12px);
+}
+
+#back-to-top-btn:hover {
+  color: #123a32;
+  background: #ffffff;
+  border-color: rgba(59, 111, 101, 0.34);
+}
+
+#back-to-top-btn:active {
+  transform: translateY(1px);
 }
 
 #tab-bar {
@@ -733,6 +797,10 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   border-radius: 6px;
   font-size: 13px;
   text-align: left;
+}
+
+.context-menu [hidden] {
+  display: none !important;
 }
 
 .context-menu button:hover:not(:disabled) {

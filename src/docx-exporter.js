@@ -50,11 +50,70 @@ function ptToTwips(value, fallback = 0) {
 function spacingFromBlock(block = {}, lineSpacing = 240) {
   const beforePt = parsePt(block.spacingBefore, 0);
   const afterPt = parsePt(block.spacingAfter, 0);
+  if (block.exactSpacing) {
+    return {
+      line: lineSpacing,
+      before: ptToTwips(beforePt),
+      after: ptToTwips(afterPt),
+    };
+  }
+
   const lineSpacingExtra = lineSpacing - 240;
   return {
     line: lineSpacing,
     before: Math.max(0, ptToTwips(beforePt) + Math.round(lineSpacingExtra / 2)),
     after: Math.max(0, ptToTwips(afterPt) - Math.round(lineSpacingExtra / 2)),
+  };
+}
+
+function lengthToTwips(value, fontSizePt = 12, fallback = 0) {
+  if (!value) return fallback;
+  const text = String(value).trim();
+  const amount = Number.parseFloat(text);
+  if (!Number.isFinite(amount)) return fallback;
+  if (text.endsWith("em")) return Math.round(amount * fontSizePt * 20);
+  return ptToTwips(text, fallback);
+}
+
+function getExportLayoutScheme(themeId, layoutScheme) {
+  if (themeId !== "academic") return layoutScheme;
+
+  return {
+    ...layoutScheme,
+    body: {
+      ...layoutScheme.body,
+      lineHeight: 1.5,
+    },
+    headings: Object.fromEntries(
+      HEADING_LEVELS.map((level) => [
+        level,
+        {
+          ...layoutScheme.headings[level],
+          spacingBefore: "0pt",
+          spacingAfter: "0pt",
+          lineHeight: 1.5,
+          exactSpacing: true,
+        },
+      ]),
+    ),
+    code: {
+      ...layoutScheme.code,
+      lineHeight: 1.5,
+    },
+    blocks: {
+      ...layoutScheme.blocks,
+      paragraph: {
+        ...layoutScheme.blocks.paragraph,
+        spacingBefore: "0pt",
+        spacingAfter: "0pt",
+        textIndent: "2em",
+        exactSpacing: true,
+      },
+      table: {
+        ...layoutScheme.blocks.table,
+        lineHeight: 1.5,
+      },
+    },
   };
 }
 
@@ -138,14 +197,25 @@ function buildTableBorders(tableStyle, colorScheme) {
 }
 
 function buildThemeStyles() {
-  const { id, theme, layoutScheme, colorScheme, tableStyle, codeTheme, fontConfig } =
+  const { id, theme, layoutScheme: currentLayoutScheme, colorScheme, tableStyle, codeTheme, fontConfig } =
     getCurrentThemeDefinition();
+  const layoutScheme = getExportLayoutScheme(id, currentLayoutScheme);
   const typographyValues = getTypographyValuesForScope(id, "export");
   const fontSize = (key, fallback) => typographyValues[key] ?? fallback;
   const bodyLineSpacing = Math.round((layoutScheme.body.lineHeight || 1.5) * 240);
+  const bodyFontSize = fontSize("body", layoutScheme.body.fontSize);
+  const bodyFontSizePt = parsePt(bodyFontSize, parsePt(layoutScheme.body.fontSize, 12));
   const bodyFont = fontForDocx(theme.fontScheme.body.fontFamily, fontConfig);
   const codeFont = fontForDocx(theme.fontScheme.code.fontFamily, fontConfig);
   const paragraphSpacing = spacingFromBlock(layoutScheme.blocks.paragraph, bodyLineSpacing);
+  const firstLineIndent = lengthToTwips(
+    layoutScheme.blocks.paragraph?.textIndent,
+    bodyFontSizePt,
+  );
+  const bodyParagraph = {
+    spacing: paragraphSpacing,
+    ...(firstLineIndent > 0 ? { indent: { firstLine: firstLineIndent } } : {}),
+  };
   const headingStyles = {};
 
   HEADING_LEVELS.forEach((level, index) => {
@@ -179,6 +249,10 @@ function buildThemeStyles() {
   });
 
   const tablePadding = ptToTwips(tableStyle.cell.padding, 6);
+  const codeLineSpacing = Math.round((layoutScheme.code.lineHeight || 1.15) * 240);
+  const tableLineSpacing = Math.round(
+    (layoutScheme.blocks.table?.lineHeight || 1) * 240,
+  );
 
   return {
     pageBackground: stripHash(colorScheme.background.page, "FFFFFF"),
@@ -192,6 +266,7 @@ function buildThemeStyles() {
         spacing: paragraphSpacing,
       },
     },
+    bodyParagraph,
     headings: headingStyles,
     linkColor: stripHash(colorScheme.accent.link, "0969DA"),
     code: {
@@ -200,7 +275,7 @@ function buildThemeStyles() {
       background: stripHash(colorScheme.background.code, "F6F8FA"),
       foreground: stripHash(codeTheme.foreground || colorScheme.text.primary),
       colors: codeTheme.colors || {},
-      spacing: spacingFromBlock(layoutScheme.blocks.codeBlock, 276),
+      spacing: spacingFromBlock(layoutScheme.blocks.codeBlock, codeLineSpacing),
     },
     blockquote: {
       background: colorScheme.background.blockquote
@@ -214,7 +289,8 @@ function buildThemeStyles() {
       spacing: spacingFromBlock(layoutScheme.blocks.listItem, bodyLineSpacing),
     },
     table: {
-      spacing: spacingFromBlock(layoutScheme.blocks.table, 240),
+      spacing: spacingFromBlock(layoutScheme.blocks.table, tableLineSpacing),
+      textSpacing: { before: 40, after: 40, line: tableLineSpacing },
       borders: buildTableBorders(tableStyle, colorScheme),
       cellMargins: {
         top: tablePadding,
@@ -344,12 +420,14 @@ function processBlockElement(el, themeStyles, listLevel = -1) {
     results.push(
       new Paragraph({
         heading: heading.heading,
+        ...heading.paragraph,
         children: processInlineChildren(el, themeStyles, heading.run),
       }),
     );
   } else if (tag === "P") {
     results.push(
       new Paragraph({
+        ...themeStyles.bodyParagraph,
         children: processInlineChildren(el, themeStyles),
       }),
     );
@@ -399,6 +477,7 @@ function processBlockElement(el, themeStyles, listLevel = -1) {
   } else {
     results.push(
       new Paragraph({
+        ...themeStyles.bodyParagraph,
         children: processInlineChildren(el, themeStyles),
       }),
     );
@@ -611,7 +690,7 @@ function paragraphStyles(themeStyles) {
       basedOn: "Normal",
       next: "Normal",
       run: { size: Math.max(1, themeStyles.default.run.size - 2) },
-      paragraph: { spacing: { before: 40, after: 40, line: 240 } },
+      paragraph: { spacing: themeStyles.table.textSpacing },
     },
     {
       id: "TableHeader",
@@ -619,7 +698,7 @@ function paragraphStyles(themeStyles) {
       basedOn: "TableText",
       next: "TableText",
       run: { bold: true, color: themeStyles.table.header.color },
-      paragraph: { alignment: AlignmentType.CENTER },
+      paragraph: { spacing: themeStyles.table.textSpacing, alignment: AlignmentType.CENTER },
     },
     {
       id: "HorizontalRule",

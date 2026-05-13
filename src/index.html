@@ -11,8 +11,9 @@
   <body data-theme="default">
     <div id="app-shell">
       <aside id="side-panel" aria-label="文档信息">
-        <div class="panel-header">
-          <h1>资源管理器</h1>
+        <div id="side-panel-drag-region" data-tauri-drag-region></div>
+        <div class="panel-header" data-tauri-drag-region>
+          <h1 data-tauri-drag-region>资源管理器</h1>
         </div>
         <section id="workspace-section" aria-label="Markdown 文件">
           <div class="workspace-header">
@@ -96,6 +97,7 @@
             <article id="markdown-content" class="markdown-body"></article>
           </div>
         </div>
+        <button id="back-to-top-btn" class="hidden" type="button" title="返回顶端" aria-label="返回顶端">↑</button>
       </main>
     </div>
     <div id="tab-context-menu" class="context-menu hidden" role="menu" aria-label="标签页菜单">
@@ -106,7 +108,10 @@
       <button type="button" data-tab-action="close-all">关闭全部标签页</button>
     </div>
     <div id="workspace-context-menu" class="context-menu hidden" role="menu" aria-label="文件菜单">
-      <button type="button" data-workspace-action="reveal">在 Finder 中显示</button>
+      <button type="button" data-workspace-action="reveal">在文件管理器中显示</button>
+      <div class="context-menu-separator"></div>
+      <button type="button" data-workspace-action="close-folder">关闭文件夹</button>
+      <button type="button" data-workspace-action="close-file">关闭文件</button>
     </div>
     <div id="settings-backdrop" class="hidden">
       <section id="typography-dialog" role="dialog" aria-modal="true" aria-labelledby="typography-title">

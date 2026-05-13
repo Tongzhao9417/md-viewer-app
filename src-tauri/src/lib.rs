@@ -4,7 +4,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::{Emitter, LogicalSize, Manager, Size, WebviewWindow};
+
+const DEFAULT_WINDOW_WIDTH: f64 = 1200.0;
+const DEFAULT_WINDOW_HEIGHT: f64 = 820.0;
+const MIN_WINDOW_WIDTH: f64 = 1100.0;
+const MIN_WINDOW_HEIGHT: f64 = 760.0;
+const MAX_WINDOW_WIDTH: f64 = 1600.0;
+const MAX_WINDOW_HEIGHT: f64 = 1040.0;
+const WINDOW_WIDTH_RATIO: f64 = 0.82;
+const WINDOW_HEIGHT_RATIO: f64 = 0.86;
+const WINDOW_EDGE_MARGIN: f64 = 80.0;
 
 #[derive(Clone, Serialize)]
 struct FilePayload {
@@ -29,6 +40,68 @@ struct WorkspacePayload {
 struct AppState {
     current_file: Mutex<Option<PathBuf>>,
     watched_files: Mutex<HashSet<PathBuf>>,
+}
+
+fn clamp_window_axis(value: f64, min: f64, max: f64, available: f64) -> f64 {
+    let usable = (available - WINDOW_EDGE_MARGIN).max(min.min(available));
+    value.clamp(min, max).min(usable).max(available.min(min))
+}
+
+fn preferred_window_size(app: &tauri::AppHandle) -> (f64, f64) {
+    let Some(monitor) = app.primary_monitor().ok().flatten() else {
+        return (DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT);
+    };
+
+    let work_area = monitor.work_area();
+    let scale_factor = monitor.scale_factor().max(1.0);
+    let available_width = f64::from(work_area.size.width) / scale_factor;
+    let available_height = f64::from(work_area.size.height) / scale_factor;
+
+    let width = clamp_window_axis(
+        available_width * WINDOW_WIDTH_RATIO,
+        MIN_WINDOW_WIDTH,
+        MAX_WINDOW_WIDTH,
+        available_width,
+    );
+    let height = clamp_window_axis(
+        available_height * WINDOW_HEIGHT_RATIO,
+        MIN_WINDOW_HEIGHT,
+        MAX_WINDOW_HEIGHT,
+        available_height,
+    );
+
+    (width.round(), height.round())
+}
+
+fn resize_window_for_display(window: &WebviewWindow) {
+    let Ok(Some(monitor)) = window.primary_monitor() else {
+        let _ = window.set_size(Size::Logical(LogicalSize::new(
+            DEFAULT_WINDOW_WIDTH,
+            DEFAULT_WINDOW_HEIGHT,
+        )));
+        let _ = window.center();
+        return;
+    };
+
+    let work_area = monitor.work_area();
+    let scale_factor = monitor.scale_factor().max(1.0);
+    let available_width = f64::from(work_area.size.width) / scale_factor;
+    let available_height = f64::from(work_area.size.height) / scale_factor;
+    let width = clamp_window_axis(
+        available_width * WINDOW_WIDTH_RATIO,
+        MIN_WINDOW_WIDTH,
+        MAX_WINDOW_WIDTH,
+        available_width,
+    );
+    let height = clamp_window_axis(
+        available_height * WINDOW_HEIGHT_RATIO,
+        MIN_WINDOW_HEIGHT,
+        MAX_WINDOW_HEIGHT,
+        available_height,
+    );
+
+    let _ = window.set_size(Size::Logical(LogicalSize::new(width.round(), height.round())));
+    let _ = window.center();
 }
 
 fn is_markdown_file(path: &Path) -> bool {
@@ -350,24 +423,110 @@ fn save_markdown_file(
     read_md_file(&path_buf)
 }
 
-#[tauri::command]
-fn reveal_in_finder(path: String) -> Result<(), String> {
-    let path_buf = PathBuf::from(&path);
-    if !path_buf.exists() {
-        return Err(format!("Path not found: {}", path));
-    }
-
+#[cfg(target_os = "macos")]
+fn reveal_in_file_manager(path_buf: &Path) -> Result<(), String> {
     let status = Command::new("open")
         .arg("-R")
-        .arg(&path_buf)
+        .arg(path_buf)
         .status()
         .map_err(|e| e.to_string())?;
 
     if status.success() {
         Ok(())
     } else {
-        Err(format!("Failed to reveal in Finder: {}", path))
+        Err(format!("Failed to reveal path: {}", path_buf.display()))
     }
+}
+
+#[cfg(target_os = "windows")]
+fn reveal_in_file_manager(path_buf: &Path) -> Result<(), String> {
+    let status = Command::new("explorer.exe")
+        .arg(format!("/select,{}", path_buf.display()))
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to reveal path: {}", path_buf.display()))
+    }
+}
+
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+fn reveal_in_file_manager(path_buf: &Path) -> Result<(), String> {
+    let target = if path_buf.is_dir() {
+        path_buf
+    } else {
+        path_buf.parent().unwrap_or(path_buf)
+    };
+    let status = Command::new("xdg-open")
+        .arg(target)
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("Failed to reveal path: {}", path_buf.display()))
+    }
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err(format!("Path not found: {}", path));
+    }
+
+    reveal_in_file_manager(&path_buf)
+}
+
+#[tauri::command]
+async fn open_workspace_in_new_window(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err(format!("Path not found: {}", path));
+    }
+    if !path_buf.is_dir() {
+        return Err(format!("Not a directory: {}", path));
+    }
+
+    let root = fs::canonicalize(&path_buf).unwrap_or(path_buf);
+    let workspace_path = root.to_string_lossy().to_string();
+    let workspace_json = serde_json::to_string(&workspace_path).map_err(|e| e.to_string())?;
+    let init_script = format!(
+        "window.__MD_VIEWER_INITIAL_WORKSPACE__ = {};",
+        workspace_json
+    );
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let label = format!("workspace-{}", timestamp);
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .first()
+        .cloned()
+        .ok_or_else(|| "Missing window config".to_string())?;
+    config.label = label;
+    config.title = root
+        .file_name()
+        .map(|name| format!("{} - MD Viewer", name.to_string_lossy()))
+        .unwrap_or_else(|| "MD Viewer".to_string());
+
+    let (width, height) = preferred_window_size(&app);
+    tauri::WebviewWindowBuilder::from_config(&app, &config)
+        .map_err(|e| e.to_string())?
+        .inner_size(width, height)
+        .center()
+        .initialization_script(init_script)
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 fn open_file_in_window(app: &tauri::AppHandle, path: PathBuf) {
@@ -429,9 +588,14 @@ pub fn run() {
             resolve_image_path,
             write_export_file,
             save_markdown_file,
-            reveal_in_finder
+            reveal_path,
+            open_workspace_in_new_window
         ])
         .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                resize_window_for_display(&window);
+            }
+
             let args: Vec<String> = std::env::args().collect();
             if args.len() > 1 {
                 let file_path = PathBuf::from(&args[1]);

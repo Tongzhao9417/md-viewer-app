@@ -304,6 +304,7 @@ function generateCodeCSS(codeConfig, codeTheme, codeLayout, bodyFontSize, colorS
   const codeFontSize = ptToPx(codeLayout.fontSize);
   const bodyFontSizePt = parseFloat(bodyFontSize);
   const codeFontSizePt = parseFloat(codeLayout.fontSize);
+  const codeLineHeight = codeLayout.lineHeight;
   const inlineCodeScale = bodyFontSizePt > 0
     ? Number((codeFontSizePt / bodyFontSizePt).toFixed(4))
     : 1;
@@ -316,13 +317,15 @@ function generateCodeCSS(codeConfig, codeTheme, codeLayout, bodyFontSize, colorS
 }`);
 
   css.push(`#markdown-content pre {
-  background-color: ${codeBackground};
+  background-color: ${codeBackground};${codeLineHeight !== undefined ? `
+  line-height: ${codeLineHeight};` : ""}
 }`);
 
   css.push(`#markdown-content pre code {
   font-family: ${codeFontFamily};
   font-size: ${codeFontSize};
-  background-color: transparent;
+  background-color: transparent;${codeLineHeight !== undefined ? `
+  line-height: ${codeLineHeight};` : ""}
 }`);
 
   css.push(`#markdown-content .hljs {
@@ -349,9 +352,20 @@ function generateBlockSpacingCSS(layoutScheme, colorScheme) {
   if (blocks.paragraph) {
     const marginBefore = toPx(blocks.paragraph.spacingBefore);
     const marginAfter = toPx(blocks.paragraph.spacingAfter);
+    const textIndent = blocks.paragraph.textIndent;
     css.push(`#markdown-content p {
-  margin: ${marginBefore} 0 ${marginAfter} 0;
+  margin: ${marginBefore} 0 ${marginAfter} 0;${textIndent ? `
+  text-indent: ${textIndent};` : ""}
 }`);
+
+    if (textIndent) {
+      css.push(`#markdown-content li > p,
+#markdown-content blockquote p,
+#markdown-content th p,
+#markdown-content td p {
+  text-indent: 0;
+}`);
+    }
   }
 
   if (blocks.list) {
