@@ -324,6 +324,33 @@ fn write_export_file(path: String, contents: Vec<u8>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn save_markdown_file(
+    path: String,
+    contents: String,
+    state: tauri::State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<FilePayload, String> {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err(format!("File not found: {}", path));
+    }
+    if !path_buf.is_file() || !is_markdown_file(&path_buf) {
+        return Err(format!("Not a Markdown file: {}", path));
+    }
+
+    fs::write(&path_buf, contents).map_err(|e| e.to_string())?;
+    *state.current_file.lock().unwrap() = Some(path_buf.clone());
+
+    let mut watched = state.watched_files.lock().unwrap();
+    if !watched.contains(&path_buf) {
+        watched.insert(path_buf.clone());
+        start_watcher(app, path_buf.clone());
+    }
+
+    read_md_file(&path_buf)
+}
+
+#[tauri::command]
 fn reveal_in_finder(path: String) -> Result<(), String> {
     let path_buf = PathBuf::from(&path);
     if !path_buf.exists() {
@@ -401,6 +428,7 @@ pub fn run() {
             list_markdown_files,
             resolve_image_path,
             write_export_file,
+            save_markdown_file,
             reveal_in_finder
         ])
         .setup(|app| {

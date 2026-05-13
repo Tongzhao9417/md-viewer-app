@@ -523,6 +523,17 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   box-shadow: 0 1px 2px rgba(44, 44, 38, 0.06);
 }
 
+.tab.dirty .tab-title::before {
+  content: "*";
+  margin-right: 2px;
+  color: var(--app-accent);
+  font-weight: 700;
+}
+
+.tab.conflicted .tab-title::before {
+  color: #a35b20;
+}
+
 .tab-title {
   min-width: 0;
   overflow: hidden;
@@ -561,8 +572,39 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   margin-left: 12px;
 }
 
+#view-mode-toggle {
+  display: inline-flex;
+  height: 30px;
+  padding: 2px;
+  background: var(--app-soft);
+  border: 1px solid #e1e1db;
+  border-radius: 8px;
+}
+
+#view-mode-toggle button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  height: 24px;
+  padding: 0 8px;
+  color: #606660;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+#view-mode-toggle button[aria-pressed="true"] {
+  color: #173f38;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(44, 44, 38, 0.08);
+}
+
 #theme-select,
 #typography-btn,
+#save-md-btn,
 #export-btn {
   display: inline-flex;
   align-items: center;
@@ -592,6 +634,22 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   font-weight: 650;
 }
 
+#save-md-btn {
+  min-width: 46px;
+  padding: 0 10px;
+}
+
+#editor-status {
+  max-width: 86px;
+  overflow: hidden;
+  color: #7c817b;
+  flex-shrink: 1;
+  font-size: 12px;
+  line-height: 30px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #export-wrapper {
   position: relative;
   flex-shrink: 0;
@@ -604,12 +662,19 @@ body.is-resizing-sidebar #sidebar-resizer::after {
 
 #theme-select:hover,
 #typography-btn:hover,
+#save-md-btn:hover:not(:disabled),
 #export-btn:hover:not(:disabled) {
   color: #143f37;
   border-color: #cfd4cb;
   background-color: #ffffff;
 }
 
+#view-mode-toggle button:hover:not(:disabled) {
+  color: #143f37;
+}
+
+#view-mode-toggle button:disabled,
+#save-md-btn:disabled,
 #export-btn:disabled {
   opacity: 0.45;
 }
@@ -695,6 +760,11 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   background: var(--bg);
 }
 
+#reader-content.reader-mode-edit,
+#reader-content.reader-mode-split {
+  overflow: hidden;
+}
+
 #reader-content::-webkit-scrollbar-track {
   background: var(--bg);
 }
@@ -722,6 +792,71 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   margin-top: 6px;
   color: #9a9d98;
   font-size: 13px;
+}
+
+#document-workspace {
+  min-width: 0;
+  min-height: 100%;
+}
+
+#document-workspace[hidden] {
+  display: none !important;
+}
+
+#document-workspace.mode-edit,
+#document-workspace.mode-split {
+  height: 100%;
+  min-height: 0;
+}
+
+#document-workspace.mode-split {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(0, 1.05fr);
+}
+
+#markdown-editor {
+  display: none;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 52px 48px 80px;
+  overflow: auto;
+  color: var(--text);
+  background: var(--bg);
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  resize: none;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 14px;
+  line-height: 1.65;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#document-workspace.mode-edit #markdown-editor,
+#document-workspace.mode-split #markdown-editor {
+  display: block;
+}
+
+#document-workspace.mode-edit #markdown-content {
+  display: none !important;
+}
+
+#document-workspace.mode-split #markdown-editor {
+  border-right: 1px solid var(--border);
+}
+
+#document-workspace.mode-split #markdown-content {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
 }
 
 #markdown-content {
@@ -855,7 +990,8 @@ body.is-resizing-sidebar #sidebar-resizer::after {
 }
 
 #settings-backdrop,
-#update-backdrop {
+#update-backdrop,
+#unsaved-backdrop {
   position: fixed;
   inset: 0;
   z-index: 100;
@@ -871,8 +1007,15 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   justify-content: center;
 }
 
+#unsaved-backdrop {
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
 #typography-dialog,
-#update-dialog {
+#update-dialog,
+#unsaved-dialog {
   width: min(420px, calc(100vw - 36px));
   max-height: calc(100vh - 78px);
   overflow: auto;
@@ -963,6 +1106,22 @@ body.is-resizing-sidebar #sidebar-resizer::after {
 #update-progress-text {
   color: var(--app-muted);
   font-size: 12px;
+}
+
+#unsaved-file-name,
+#unsaved-message {
+  margin: 0;
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+#unsaved-file-name {
+  margin-top: 3px;
+}
+
+#unsaved-message {
+  padding: 14px 16px;
 }
 
 .icon-button {
@@ -1073,7 +1232,8 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   background: #f2f2ee;
 }
 
-#typography-save {
+#typography-save,
+#unsaved-save {
   color: #ffffff;
   background: var(--app-accent);
   border-color: var(--app-accent);
@@ -1107,6 +1267,15 @@ body.is-resizing-sidebar #sidebar-resizer::after {
     margin-left: 8px;
   }
 
+  #view-mode-toggle button {
+    min-width: 34px;
+    padding: 0 6px;
+  }
+
+  #editor-status {
+    display: none;
+  }
+
   #theme-select {
     width: 96px;
   }
@@ -1123,9 +1292,28 @@ body.is-resizing-sidebar #sidebar-resizer::after {
   #markdown-content {
     padding: 34px 20px 56px;
   }
+
+  #markdown-editor {
+    padding: 34px 20px 56px;
+  }
+
+  #document-workspace.mode-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(180px, 0.44fr) minmax(0, 0.56fr);
+  }
+
+  #document-workspace.mode-split #markdown-editor {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
 }
 
 @media (max-width: 520px) {
+  #save-md-btn,
+  #view-mode-toggle [data-view-mode="split"] {
+    display: none;
+  }
+
   #theme-select {
     display: none;
   }
@@ -1157,11 +1345,21 @@ body.is-resizing-sidebar #sidebar-resizer::after {
 
   #side-panel,
   #tab-bar,
-  #empty-state {
+  #empty-state,
+  #markdown-editor {
     display: none !important;
   }
 
+  #document-workspace,
+  #document-workspace.mode-edit,
+  #document-workspace.mode-split {
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+
   #markdown-content {
+    display: block !important;
     width: auto;
     max-width: none;
     min-height: 0;
