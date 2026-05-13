@@ -59,6 +59,13 @@
         <div id="tab-bar">
           <div id="tab-list"></div>
           <div id="toolbar-actions">
+            <div id="view-mode-toggle" aria-label="视图模式">
+              <button type="button" data-view-mode="preview" aria-pressed="true" disabled>预览</button>
+              <button type="button" data-view-mode="edit" aria-pressed="false" disabled>编辑</button>
+              <button type="button" data-view-mode="split" aria-pressed="false" disabled>分屏</button>
+            </div>
+            <button id="save-md-btn" type="button" disabled title="保存 Markdown (⌘S)" aria-label="保存 Markdown">保存</button>
+            <span id="editor-status" aria-live="polite"></span>
             <select id="theme-select" aria-label="主题"></select>
             <button id="typography-btn" title="主题字号" aria-label="主题字号">Aa</button>
             <div id="export-wrapper">
@@ -76,7 +83,18 @@
             <p>拖拽 Markdown 文件或目录到窗口打开</p>
             <p class="hint">拖入目录后，可以从左侧列表选择文档阅读</p>
           </div>
-          <article id="markdown-content" class="markdown-body" style="display:none;"></article>
+          <div id="document-workspace" class="mode-preview" hidden>
+            <textarea
+              id="markdown-editor"
+              aria-label="Markdown 编辑器"
+              spellcheck="false"
+              autocapitalize="off"
+              autocomplete="off"
+              autocorrect="off"
+              wrap="soft"
+            ></textarea>
+            <article id="markdown-content" class="markdown-body"></article>
+          </div>
         </div>
       </main>
     </div>
@@ -135,6 +153,23 @@
           <button id="update-later" type="button">稍后再说</button>
           <span class="dialog-spacer"></span>
           <button id="update-install" type="button">立即更新</button>
+        </footer>
+      </section>
+    </div>
+    <div id="unsaved-backdrop" class="hidden">
+      <section id="unsaved-dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-title">
+        <header class="dialog-header">
+          <div>
+            <h2 id="unsaved-title">保存更改</h2>
+            <p id="unsaved-file-name"></p>
+          </div>
+        </header>
+        <p id="unsaved-message">这个文档有未保存的更改。</p>
+        <footer class="dialog-actions">
+          <button id="unsaved-discard" type="button" data-unsaved-action="discard">放弃更改</button>
+          <span class="dialog-spacer"></span>
+          <button id="unsaved-cancel" type="button" data-unsaved-action="cancel">取消</button>
+          <button id="unsaved-save" type="button" data-unsaved-action="save">保存</button>
         </footer>
       </section>
     </div>
