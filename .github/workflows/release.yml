@@ -24,12 +24,12 @@ jobs:
           - name: macOS Apple Silicon
             platform: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            args: --target aarch64-apple-darwin --bundles dmg
+            args: --target aarch64-apple-darwin --bundles app,dmg
             artifact-name: md-viewer-macos-apple-silicon
           - name: macOS Intel
             platform: macos-latest
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            args: --target x86_64-apple-darwin --bundles dmg
+            args: --target x86_64-apple-darwin --bundles app,dmg
             artifact-name: md-viewer-macos-intel
           - name: Windows
             platform: windows-latest
@@ -126,4 +126,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        run: gh release edit "$RELEASE_TAG" --draft=false --prerelease=false
+        run: gh release edit "$RELEASE_TAG" --draft=false --prerelease=false --repo "$GITHUB_REPOSITORY"
