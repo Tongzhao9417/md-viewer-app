@@ -16,6 +16,15 @@ import {
   getTypographyValuesForScope,
   saveThemeTypographySettings,
 } from "./theme-settings.js";
+import {
+  applyTranslations,
+  getAvailableLocales,
+  getHtmlLang,
+  getLocale,
+  pickLocalized,
+  setLocale,
+  t,
+} from "./i18n.js";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
@@ -30,7 +39,7 @@ const initialWorkspacePath =
     : "";
 const isTauriRuntime = Boolean(window.__TAURI__?.core);
 const invoke = window.__TAURI__?.core?.invoke ?? (async () => {
-  throw new Error("Tauri runtime is unavailable.");
+  throw new Error(t("error.tauriUnavailable"));
 });
 const listen = window.__TAURI__?.event?.listen ?? (() => {});
 const getCurrentWebviewWindow = window.__TAURI__?.webviewWindow?.getCurrentWebviewWindow ?? (() => null);
@@ -72,6 +81,7 @@ const editorEl = () => document.getElementById("markdown-editor");
 const emptyEl = () => document.getElementById("empty-state");
 const tabListEl = () => document.getElementById("tab-list");
 const themeSelect = () => document.getElementById("theme-select");
+const languageSelect = () => document.getElementById("settings-language-select");
 const readerContentEl = () => document.getElementById("reader-content");
 const backToTopButton = () => document.getElementById("back-to-top-btn");
 const saveMarkdownButton = () => document.getElementById("save-md-btn");
@@ -93,6 +103,8 @@ let pendingPreviewRenderId = 0;
 let unsavedDecisionResolver = null;
 let mermaidModulePromise = null;
 let mermaidRenderCounter = 0;
+let settingsUpdateStatusKey = "";
+let settingsUpdateStatusParams = {};
 const collapsedWorkspaceDirs = new Set();
 const SIDEBAR_WIDTH_KEY = "md-viewer-sidebar-width-v2";
 const OUTLINE_HEIGHT_KEY = "md-viewer-outline-height";
@@ -213,6 +225,81 @@ const BLOCK_TAGS = new Set([
   "TABLE",
   "UL",
 ]);
+
+function syncLanguageSelect() {
+  const select = languageSelect();
+  if (select) select.value = getLocale();
+}
+
+function setSettingsUpdateStatus(key = "", params = {}) {
+  settingsUpdateStatusKey = key;
+  settingsUpdateStatusParams = params;
+
+  const status = document.getElementById("settings-update-status");
+  if (status) {
+    status.textContent = key ? t(key, params) : "";
+  }
+}
+
+function syncSettingsUpdateStatus() {
+  setSettingsUpdateStatus(settingsUpdateStatusKey, settingsUpdateStatusParams);
+}
+
+function buildLanguageSelectOptions(select) {
+  select.innerHTML = "";
+  getAvailableLocales().forEach((locale) => {
+    const option = document.createElement("option");
+    option.value = locale.id;
+    option.textContent = locale.label;
+    option.selected = locale.id === getLocale();
+    select.appendChild(option);
+  });
+}
+
+function refreshLocalizedUI() {
+  applyTranslations(document);
+  syncLanguageSelect();
+  syncSettingsUpdateStatus();
+
+  const currentTheme = currentThemeId();
+  const themeControl = themeSelect();
+  if (themeControl) {
+    buildThemeSelectOptions(themeControl, currentTheme);
+    themeControl.value = currentTheme;
+  }
+
+  const typographyBackdrop = document.getElementById("settings-backdrop");
+  if (typographyBackdrop && !typographyBackdrop.classList.contains("hidden")) {
+    fillTypographyDialog();
+  }
+
+  const unsavedBackdrop = document.getElementById("unsaved-backdrop");
+  const unsavedMessage = document.getElementById("unsaved-message");
+  if (unsavedBackdrop && unsavedMessage && !unsavedBackdrop.classList.contains("hidden")) {
+    unsavedMessage.textContent = t("unsaved.closeMessage");
+  }
+
+  const activeTab = getActiveTab();
+  setTitle(activeTab?.path || null, { dirty: Boolean(activeTab?.dirty) });
+  renderWorkspaceFiles();
+  renderDocumentOutline();
+  updateEditorControls();
+  updateWorkspaceContextMenuState(contextWorkspaceTarget);
+}
+
+function initI18nControls() {
+  applyTranslations(document);
+
+  const select = languageSelect();
+  if (!select) return;
+
+  buildLanguageSelectOptions(select);
+  select.value = getLocale();
+  select.addEventListener("change", (event) => {
+    setLocale(event.target.value);
+    refreshLocalizedUI();
+  });
+}
 
 function getDirName(path) {
   const value = String(path || "").replace(/[\\/]+$/, "");
@@ -444,7 +531,7 @@ async function getMermaid() {
 function showMermaidError(diagram, source, error) {
   const message = document.createElement("div");
   message.className = "mermaid-error";
-  message.textContent = `Mermaid 图表渲染失败：${getErrorMessage(error)}`;
+  message.textContent = t("mermaid.renderFailed", { message: getErrorMessage(error) });
 
   const pre = document.createElement("pre");
   const code = document.createElement("code");
@@ -523,11 +610,11 @@ function applyLineEnding(content, lineEnding = "\n") {
 
 function setTitle(filePath, { dirty = false } = {}) {
   if (!filePath) {
-    document.title = "MD Viewer";
+    document.title = t("app.name");
     return;
   }
   const name = getFileName(filePath);
-  document.title = `${dirty ? "* " : ""}${name} — MD Viewer`;
+  document.title = `${dirty ? "* " : ""}${name} — ${t("app.name")}`;
 }
 
 function escapeHTML(value) {
@@ -570,9 +657,9 @@ function getRuntimePlatform() {
 
 function getRevealActionLabel() {
   const platform = getRuntimePlatform();
-  if (/win/i.test(platform)) return "在资源管理器中显示";
-  if (/mac/i.test(platform)) return "在 Finder 中显示";
-  return "在文件管理器中显示";
+  if (/win/i.test(platform)) return t("context.reveal.win");
+  if (/mac/i.test(platform)) return t("context.reveal.mac");
+  return t("context.reveal.default");
 }
 
 function joinPath(base, relative) {
@@ -862,7 +949,7 @@ function renderDocumentOutline() {
   if (!activeTabId) {
     const item = document.createElement("li");
     item.className = "outline-empty";
-    item.textContent = "Open a markdown file";
+    item.textContent = t("outline.openFile");
     outline.appendChild(item);
     return;
   }
@@ -871,7 +958,7 @@ function renderDocumentOutline() {
   if (!headings.length) {
     const item = document.createElement("li");
     item.className = "outline-empty";
-    item.textContent = "No headings";
+    item.textContent = t("outline.noHeadings");
     outline.appendChild(item);
     return;
   }
@@ -900,7 +987,7 @@ function renderDocumentOutline() {
     if (headingSourceLines[index] !== null && headingSourceLines[index] !== undefined) {
       button.dataset.outlineLine = String(headingSourceLines[index]);
     }
-    button.textContent = heading.textContent.trim() || `Heading ${index + 1}`;
+    button.textContent = heading.textContent.trim() || t("outline.heading", { number: index + 1 });
     item.appendChild(button);
 
     const childList = document.createElement("ol");
@@ -1074,7 +1161,7 @@ function renderWorkspaceRoot(parentList, activePath) {
 
   const name = document.createElement("span");
   name.className = "tree-name";
-  name.textContent = workspace.name || getBaseName(workspace.root) || "Workspace";
+  name.textContent = workspace.name || getBaseName(workspace.root) || t("workspace.defaultName");
   button.appendChild(name);
 
   const count = document.createElement("span");
@@ -1088,7 +1175,7 @@ function renderWorkspaceRoot(parentList, activePath) {
   if (isCollapsed) return;
 
   if (!workspace.files.length) {
-    renderEmptyTreeItem(parentList, "No Markdown files found", 1);
+    renderEmptyTreeItem(parentList, t("workspace.noMarkdown"), 1);
     return;
   }
 
@@ -1117,7 +1204,7 @@ function renderWorkspaceFiles() {
   fileList.innerHTML = "";
   if (!workspace) {
     if (!looseFiles.length) {
-      renderEmptyTreeItem(fileList, "Drop a folder or Markdown file");
+      renderEmptyTreeItem(fileList, t("workspace.drop"));
     }
     renderLooseFiles(getActiveTab()?.path);
     return;
@@ -1255,10 +1342,11 @@ function renderTabBar() {
         if (tab.externalContent !== null) classes.push("conflicted");
         const fileName = getFileName(tab.path);
         const title = escapeHTML(fileName);
+        const closeLabel = escapeHTML(t("common.close"));
         return (
           `<div class="${classes.join(" ")}" data-tab-id="${tab.id}" title="${title}">` +
           `<span class="tab-title" title="${title}">${title}</span>` +
-          `<button class="tab-close">×</button>` +
+          `<button class="tab-close" type="button" title="${closeLabel}" aria-label="${closeLabel}">×</button>` +
           `</div>`
         );
       },
@@ -1279,7 +1367,7 @@ function scrollTabIntoView(tabId) {
 
 function getErrorMessage(error) {
   if (typeof error === "string") return error;
-  return error?.message || "Unknown error";
+  return error?.message || t("error.unknown");
 }
 
 function cancelPendingPreviewRender() {
@@ -1995,10 +2083,10 @@ function updateEditorControls() {
   const status = editorStatusEl();
   if (status) {
     if (!tab) status.textContent = "";
-    else if (tab.saving) status.textContent = "保存中...";
-    else if (tab.externalContent !== null) status.textContent = "外部已修改";
-    else if (tab.dirty) status.textContent = "未保存";
-    else status.textContent = "已保存";
+    else if (tab.saving) status.textContent = t("editor.status.saving");
+    else if (tab.externalContent !== null) status.textContent = t("editor.status.externalModified");
+    else if (tab.dirty) status.textContent = t("editor.status.unsaved");
+    else status.textContent = t("editor.status.saved");
   }
 
   if (tab) {
@@ -2072,7 +2160,7 @@ async function saveTab(tab = getActiveTab()) {
     return true;
   } catch (error) {
     console.error("Failed to save Markdown:", error);
-    window.alert(`保存失败：${getErrorMessage(error)}`);
+    window.alert(t("alert.saveFailed", { message: getErrorMessage(error) }));
     return false;
   } finally {
     tab.saving = false;
@@ -2146,9 +2234,7 @@ async function handleExternalFileChange(path, rawContent) {
 
   if (tab.id !== activeTabId) return;
 
-  const shouldReload = window.confirm(
-    `"${getFileName(tab.path)}" 已在外部修改。\n\n重新载入会丢弃当前未保存的编辑。要重新载入吗？`,
-  );
+  const shouldReload = window.confirm(t("confirm.externalModified", { name: getFileName(tab.path) }));
 
   if (shouldReload) {
     replaceTabContentFromDisk(tab, rawContent);
@@ -2251,11 +2337,11 @@ function requestUnsavedDecision(tab) {
   const message = document.getElementById("unsaved-message");
 
   if (!backdrop || !fileName || !message) {
-    return Promise.resolve(window.confirm("文档有未保存的更改。关闭并放弃更改吗？") ? "discard" : "cancel");
+    return Promise.resolve(window.confirm(t("unsaved.confirmDiscard")) ? "discard" : "cancel");
   }
 
   fileName.textContent = getFileName(tab.path);
-  message.textContent = "这个文档有未保存的更改。关闭前可以保存，也可以放弃这些更改。";
+  message.textContent = t("unsaved.closeMessage");
   backdrop.classList.remove("hidden");
 
   return new Promise((resolve) => {
@@ -2557,7 +2643,7 @@ function loadImageElementFromBlob(blob) {
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("图片无法加载，不能复制。"));
+      reject(new Error(t("image.loadFailed")));
     };
     image.src = url;
   });
@@ -2610,7 +2696,7 @@ function imageToPngBlob(image) {
       const height = source.naturalHeight || source.height || image.naturalHeight;
 
       if (!width || !height) {
-        throw new Error("图片没有可读取的像素数据。");
+        throw new Error(t("image.noPixels"));
       }
 
       const canvas = document.createElement("canvas");
@@ -2618,7 +2704,7 @@ function imageToPngBlob(image) {
       canvas.height = height;
 
       const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error("当前环境无法处理图片。");
+      if (!ctx) throw new Error(t("image.cannotProcess"));
 
       try {
         ctx.drawImage(source, 0, 0, width, height);
@@ -2628,7 +2714,7 @@ function imageToPngBlob(image) {
 
       canvas.toBlob((blob) => {
         if (blob) resolve(blob);
-        else reject(new Error("图片无法编码为剪贴板格式。"));
+        else reject(new Error(t("image.encodeFailed")));
       }, "image/png");
     })().catch(reject);
   });
@@ -2637,7 +2723,7 @@ function imageToPngBlob(image) {
 async function copyImageToClipboard(image) {
   if (!image) return;
   if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
-    throw new Error("当前环境不支持复制图片数据。");
+    throw new Error(t("image.unsupportedClipboard"));
   }
 
   const pngBlob = imageToPngBlob(image);
@@ -2750,7 +2836,7 @@ function initContextMenus() {
       await actionPromise;
     } catch (error) {
       console.error("Failed to copy image:", error);
-      window.alert(`复制图片失败：${getErrorMessage(error)}`);
+      window.alert(t("alert.copyImageFailed", { message: getErrorMessage(error) }));
     }
   });
 
@@ -2802,7 +2888,7 @@ function setUpdateProgress(percent, label) {
 }
 
 function formatUpdateNotes(body) {
-  return String(body || "").trim() || "此版本包含修复和改进。";
+  return String(body || "").trim() || t("update.defaultNotes");
 }
 
 function showUpdateDialog(update) {
@@ -2821,7 +2907,7 @@ function showUpdateDialog(update) {
   if (notes) notes.textContent = formatUpdateNotes(update.body);
   progress?.classList.add("hidden");
   if (progressBar) progressBar.style.width = "0%";
-  if (progressText) progressText.textContent = "准备下载";
+  if (progressText) progressText.textContent = t("update.ready");
   error?.classList.add("hidden");
   if (error) error.textContent = "";
   backdrop.classList.remove("hidden");
@@ -2837,21 +2923,24 @@ function showUpdateDialog(update) {
         if (event.event === "Started") {
           downloaded = 0;
           contentLength = event.data.contentLength || 0;
-          setUpdateProgress(0, contentLength ? "开始下载更新" : "正在下载更新");
+          setUpdateProgress(0, contentLength ? t("update.downloadStart") : t("update.downloading"));
         } else if (event.event === "Progress") {
           downloaded += event.data.chunkLength;
           const percent = contentLength ? (downloaded / contentLength) * 100 : 0;
-          setUpdateProgress(percent, contentLength ? `下载中 ${Math.round(percent)}%` : "正在下载更新");
+          setUpdateProgress(
+            percent,
+            contentLength ? t("update.downloadingPercent", { percent: Math.round(percent) }) : t("update.downloading"),
+          );
         } else if (event.event === "Finished") {
-          setUpdateProgress(100, "下载完成，正在安装");
+          setUpdateProgress(100, t("update.installing"));
         }
       });
-      setUpdateProgress(100, "安装完成，正在重启");
+      setUpdateProgress(100, t("update.relaunching"));
       await relaunch();
     } catch (err) {
       console.error("Failed to install update:", err);
       if (error) {
-        error.textContent = "更新失败，请稍后重试。";
+        error.textContent = t("update.failed");
         error.classList.remove("hidden");
       }
       setUpdateDialogBusy(false);
@@ -2859,16 +2948,28 @@ function showUpdateDialog(update) {
   };
 }
 
-async function checkForAppUpdate() {
-  if (!isTauriRuntime || isScreenshotDemo) return;
+async function checkForAppUpdate({ manual = false } = {}) {
+  if (!isTauriRuntime || isScreenshotDemo) {
+    if (manual) setSettingsUpdateStatus("update.unavailable");
+    return null;
+  }
 
   try {
     const update = await check();
     if (update) {
+      if (manual) closeSettingsDialog();
       showUpdateDialog(update);
+      return update;
     }
+
+    if (manual) setSettingsUpdateStatus("update.none");
+    return null;
   } catch (err) {
     console.warn("Failed to check for updates:", err);
+    if (manual) {
+      setSettingsUpdateStatus("update.checkFailed", { message: getErrorMessage(err) });
+    }
+    return null;
   }
 }
 
@@ -3008,7 +3109,7 @@ function fillTypographyDialog() {
   const values = getTypographyInputValues(settings);
 
   document.getElementById("typography-theme-name").textContent =
-    theme.theme.name || theme.theme.name_en || theme.id;
+    pickLocalized(theme.theme) || theme.id;
   document.getElementById("typography-preview-enabled").checked =
     settings?.previewEnabled ?? true;
   document.getElementById("typography-export-enabled").checked =
@@ -3017,7 +3118,7 @@ function fillTypographyDialog() {
   const fieldsEl = document.getElementById("typography-fields");
   fieldsEl.innerHTML = TYPOGRAPHY_FIELDS.map((field) => `
     <div class="typography-field">
-      <label for="typography-${field.key}">${field.label}</label>
+      <label for="typography-${field.key}">${t(`typography.field.${field.key}`)}</label>
       <div class="typography-input-wrap">
         <input
           id="typography-${field.key}"
@@ -3049,15 +3150,43 @@ function readTypographyDialog() {
   };
 }
 
+function showSettingsPanel(panel) {
+  const settingsDialog = document.getElementById("settings-dialog");
+  const typographyDialog = document.getElementById("typography-dialog");
+  const showTypography = panel === "typography";
+
+  settingsDialog?.classList.toggle("hidden", showTypography);
+  typographyDialog?.classList.toggle("hidden", !showTypography);
+}
+
+function openSettingsDialog() {
+  const backdrop = document.getElementById("settings-backdrop");
+  if (!backdrop) return;
+
+  setSettingsUpdateStatus();
+  showSettingsPanel("settings");
+  syncLanguageSelect();
+  backdrop.classList.remove("hidden");
+  requestAnimationFrame(() => languageSelect()?.focus());
+}
+
+function closeSettingsDialog() {
+  document.getElementById("settings-backdrop")?.classList.add("hidden");
+  showSettingsPanel("settings");
+  applyTypographyOverrides();
+}
+
 function openTypographyDialog() {
   fillTypographyDialog();
   document.getElementById("settings-backdrop").classList.remove("hidden");
+  showSettingsPanel("typography");
   document.querySelector("[data-typography-key]")?.focus();
 }
 
 function closeTypographyDialog(revertPreview = true) {
-  document.getElementById("settings-backdrop").classList.add("hidden");
   if (revertPreview) applyTypographyOverrides();
+  showSettingsPanel("settings");
+  document.getElementById("settings-typography-open")?.focus();
 }
 
 function saveTypographyDialog() {
@@ -3074,34 +3203,71 @@ function resetTypographyDialog() {
   applyTypographyOverrides(themeId);
 }
 
+async function handleManualUpdateCheck() {
+  const button = document.getElementById("settings-check-update");
+  if (button?.disabled) return;
+
+  if (button) button.disabled = true;
+  setSettingsUpdateStatus("update.checking");
+
+  try {
+    await checkForAppUpdate({ manual: true });
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function initSettingsDialog() {
+  const backdrop = document.getElementById("settings-backdrop");
+  const settingsDialog = document.getElementById("settings-dialog");
+  const dialog = document.getElementById("typography-dialog");
+  if (!backdrop || !settingsDialog || !dialog) return;
+
+  document.getElementById("settings-btn")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openSettingsDialog();
+  });
+  document.getElementById("settings-close")?.addEventListener("click", closeSettingsDialog);
+  document.getElementById("settings-close-action")?.addEventListener("click", closeSettingsDialog);
+  document.getElementById("settings-typography-open")?.addEventListener("click", openTypographyDialog);
+  document.getElementById("settings-check-update")?.addEventListener("click", () => {
+    void handleManualUpdateCheck();
+  });
+
+  backdrop.addEventListener("click", (e) => {
+    if (e.target !== backdrop) return;
+    if (!dialog.classList.contains("hidden")) {
+      closeTypographyDialog();
+      return;
+    }
+    closeSettingsDialog();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || backdrop.classList.contains("hidden")) return;
+    if (!dialog.classList.contains("hidden")) {
+      closeTypographyDialog();
+      return;
+    }
+    closeSettingsDialog();
+  });
+}
+
 function initTypographySettings() {
   const backdrop = document.getElementById("settings-backdrop");
-  const dialog = document.getElementById("typography-dialog");
   const applyDraft = () => applyTypographyOverrides(currentThemeId(), readTypographyDialog());
 
-  document.getElementById("typography-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    openTypographyDialog();
-  });
   document.getElementById("typography-close").addEventListener("click", () => closeTypographyDialog());
   document.getElementById("typography-cancel").addEventListener("click", () => closeTypographyDialog());
   document.getElementById("typography-save").addEventListener("click", saveTypographyDialog);
   document.getElementById("typography-reset").addEventListener("click", resetTypographyDialog);
 
-  backdrop.addEventListener("click", (e) => {
-    if (!dialog.contains(e.target)) closeTypographyDialog();
-  });
   backdrop.addEventListener("input", (e) => {
     if (e.target.matches("[data-typography-key]")) applyDraft();
   });
   backdrop.addEventListener("change", (e) => {
     if (e.target.matches("#typography-preview-enabled, #typography-export-enabled")) {
       applyDraft();
-    }
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !backdrop.classList.contains("hidden")) {
-      closeTypographyDialog();
     }
   });
 }
@@ -3134,7 +3300,7 @@ async function handleExportHTML() {
   const dataTheme = document.body.getAttribute("data-theme") || "default";
 
   const html = `<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="${getHtmlLang()}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -3168,7 +3334,7 @@ async function handleExportDOCX() {
   flushActivePreviewRender();
   const filePath = await save({
     defaultPath: getExportDefaultPath("docx"),
-    filters: [{ name: "Word Document", extensions: ["docx"] }],
+    filters: [{ name: t("filter.wordDocument"), extensions: ["docx"] }],
   });
   if (!filePath) return;
 
@@ -3350,12 +3516,12 @@ function buildThemeSelectOptions(select, selectedTheme) {
   select.innerHTML = "";
   groupedThemes.forEach((groupThemes, categoryId) => {
     const group = document.createElement("optgroup");
-    group.label = categories[categoryId]?.name || categoryId;
+    group.label = pickLocalized(categories[categoryId]) || categoryId;
 
     groupThemes.forEach((theme) => {
       const option = document.createElement("option");
       option.value = theme.id;
-      option.textContent = theme.name || theme.name_en || theme.id;
+      option.textContent = pickLocalized(theme) || theme.id;
       option.selected = theme.id === selectedTheme;
       group.appendChild(option);
     });
@@ -3490,7 +3656,7 @@ async function openWorkspaceInNewWindow(path) {
     await invoke("open_workspace_in_new_window", { path });
   } catch (e) {
     console.error("Failed to open workspace in new window:", e);
-    window.alert(`无法在新窗口打开目录：${getErrorMessage(e)}`);
+    window.alert(t("alert.openWorkspaceInNewWindowFailed", { message: getErrorMessage(e) }));
   }
 }
 
@@ -3522,7 +3688,7 @@ async function chooseWorkspace() {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "选择 Markdown 目录",
+      title: t("dialog.chooseWorkspace"),
     });
     if (typeof selected === "string") {
       await loadWorkspace(selected);
@@ -3987,7 +4153,9 @@ function initCopyHandler() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  initI18nControls();
   initTheme();
+  initSettingsDialog();
   initTypographySettings();
   initCopyHandler();
   initExportMenu();
@@ -4020,7 +4188,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       return;
     }
 
-    if (e.target.closest("#view-mode-toggle, #save-md-btn, #theme-select, #typography-btn, #export-wrapper")) return;
+    if (e.target.closest("#view-mode-toggle, #save-md-btn, #theme-select, #settings-btn, #export-wrapper")) return;
 
     getCurrentWindow().startDragging();
   });

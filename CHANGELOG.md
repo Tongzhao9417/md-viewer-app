@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 - 2026-05-15
+
+- Added interface localization with Chinese and English language options.
+- Added a Settings panel for language selection and theme typography settings.
+- Added a manual update check action in Settings.
+
 ## 0.3.2 - 2026-05-15
 
 - Added Mermaid diagram rendering for `mermaid` fenced code blocks.

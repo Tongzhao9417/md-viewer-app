@@ -10,25 +10,25 @@
   </head>
   <body data-theme="default">
     <div id="app-shell">
-      <aside id="side-panel" aria-label="文档信息">
+      <aside id="side-panel" aria-label="文档信息" data-i18n-aria-label="panel.aria">
         <div id="side-panel-drag-region" data-tauri-drag-region></div>
         <div class="panel-header" data-tauri-drag-region>
-          <h1 data-tauri-drag-region>资源管理器</h1>
+          <h1 data-tauri-drag-region data-i18n="panel.title">资源管理器</h1>
         </div>
-        <section id="workspace-section" aria-label="Markdown 文件">
+        <section id="workspace-section" aria-label="Markdown 文件" data-i18n-aria-label="workspace.aria">
           <div class="workspace-header">
-            <span class="section-title">Files</span>
+            <span class="section-title" data-i18n="workspace.title">文件</span>
             <div class="workspace-actions">
-              <button id="open-workspace-btn" type="button" title="打开目录" aria-label="打开目录">+</button>
-              <button id="refresh-workspace-btn" type="button" title="刷新目录" aria-label="刷新目录">↻</button>
+              <button id="open-workspace-btn" type="button" title="打开目录" aria-label="打开目录" data-i18n-title="workspace.open" data-i18n-aria-label="workspace.open">+</button>
+              <button id="refresh-workspace-btn" type="button" title="刷新目录" aria-label="刷新目录" data-i18n-title="workspace.refresh" data-i18n-aria-label="workspace.refresh">↻</button>
             </div>
           </div>
           <div id="workspace-browser">
             <ol id="workspace-file-list" class="file-list workspace-tree">
-              <li class="file-list-empty">Drop a folder or Markdown file</li>
+              <li class="file-list-empty" data-i18n="workspace.drop">拖入目录或 Markdown 文件</li>
             </ol>
             <section id="loose-files-section" class="file-group" hidden>
-              <div class="file-group-title">Single Files</div>
+              <div class="file-group-title" data-i18n="workspace.singleFiles">单独文件</div>
               <ol id="loose-file-list" class="file-list loose-file-list"></ol>
             </section>
           </div>
@@ -39,12 +39,13 @@
           role="separator"
           aria-orientation="horizontal"
           aria-label="调整文件目录和文档目录大小"
+          data-i18n-aria-label="outline.resize"
           tabindex="0"
         ></div>
-        <section id="outline-section" aria-label="文档目录">
-          <div class="section-title">Document Outline</div>
+        <section id="outline-section" aria-label="文档目录" data-i18n-aria-label="outline.aria">
+          <div class="section-title" data-i18n="outline.title">文档目录</div>
           <ol id="document-outline" class="outline-list">
-            <li class="outline-empty">Open a markdown file</li>
+            <li class="outline-empty" data-i18n="outline.openFile">打开一个 Markdown 文件</li>
           </ol>
         </section>
         <div
@@ -52,6 +53,7 @@
           role="separator"
           aria-orientation="vertical"
           aria-label="调整侧边栏宽度"
+          data-i18n-aria-label="sidebar.resize"
           tabindex="0"
         ></div>
       </aside>
@@ -60,34 +62,35 @@
         <div id="tab-bar">
           <div id="tab-list"></div>
           <div id="toolbar-actions">
-            <div id="view-mode-toggle" aria-label="视图模式">
-              <button type="button" data-view-mode="preview" aria-pressed="true" disabled>预览</button>
-              <button type="button" data-view-mode="edit" aria-pressed="false" disabled>编辑</button>
-              <button type="button" data-view-mode="split" aria-pressed="false" disabled>分屏</button>
+            <div id="view-mode-toggle" aria-label="视图模式" data-i18n-aria-label="viewMode.aria">
+              <button type="button" data-view-mode="preview" aria-pressed="true" disabled data-i18n="viewMode.preview">预览</button>
+              <button type="button" data-view-mode="edit" aria-pressed="false" disabled data-i18n="viewMode.edit">编辑</button>
+              <button type="button" data-view-mode="split" aria-pressed="false" disabled data-i18n="viewMode.split">分屏</button>
             </div>
-            <button id="save-md-btn" type="button" disabled title="保存 Markdown (⌘S)" aria-label="保存 Markdown">保存</button>
+            <button id="save-md-btn" type="button" disabled title="保存 Markdown (⌘S)" aria-label="保存 Markdown" data-i18n="editor.save" data-i18n-title="editor.saveTitle" data-i18n-aria-label="editor.save">保存</button>
             <span id="editor-status" aria-live="polite"></span>
-            <select id="theme-select" aria-label="主题"></select>
-            <button id="typography-btn" title="主题字号" aria-label="主题字号">Aa</button>
+            <select id="theme-select" aria-label="主题" data-i18n-aria-label="theme.aria"></select>
+            <button id="settings-btn" type="button" title="设置" aria-label="设置" data-i18n="settings.button" data-i18n-title="settings.title" data-i18n-aria-label="settings.title">设置</button>
             <div id="export-wrapper">
-              <button id="export-btn" disabled>Export ▾</button>
+              <button id="export-btn" disabled data-i18n="export.button">导出 ▾</button>
               <div id="export-menu" class="hidden">
-                <button data-format="html">导出 HTML</button>
-                <button data-format="docx">导出 DOCX</button>
-                <button data-format="print">打印 / PDF</button>
+                <button data-format="html" data-i18n="export.html">导出 HTML</button>
+                <button data-format="docx" data-i18n="export.docx">导出 DOCX</button>
+                <button data-format="print" data-i18n="export.print">打印 / PDF</button>
               </div>
             </div>
           </div>
         </div>
         <div id="reader-content">
           <div id="empty-state">
-            <p>拖拽 Markdown 文件或目录到窗口打开</p>
-            <p class="hint">拖入目录后，可以从左侧列表选择文档阅读</p>
+            <p data-i18n="empty.primary">拖拽 Markdown 文件或目录到窗口打开</p>
+            <p class="hint" data-i18n="empty.hint">拖入目录后，可以从左侧列表选择文档阅读</p>
           </div>
           <div id="document-workspace" class="mode-preview" hidden>
             <textarea
               id="markdown-editor"
               aria-label="Markdown 编辑器"
+              data-i18n-aria-label="editor.aria"
               spellcheck="false"
               autocapitalize="off"
               autocomplete="off"
@@ -97,44 +100,80 @@
             <article id="markdown-content" class="markdown-body"></article>
           </div>
         </div>
-        <button id="back-to-top-btn" class="hidden" type="button" title="返回顶端" aria-label="返回顶端">↑</button>
+        <button id="back-to-top-btn" class="hidden" type="button" title="返回顶端" aria-label="返回顶端" data-i18n-title="backToTop" data-i18n-aria-label="backToTop">↑</button>
       </main>
     </div>
-    <div id="tab-context-menu" class="context-menu hidden" role="menu" aria-label="标签页菜单">
-      <button type="button" data-tab-action="close-current">关闭当前标签页</button>
-      <button type="button" data-tab-action="close-left">关闭左侧标签页</button>
-      <button type="button" data-tab-action="close-right">关闭右侧标签页</button>
+    <div id="tab-context-menu" class="context-menu hidden" role="menu" aria-label="标签页菜单" data-i18n-aria-label="context.tabMenu">
+      <button type="button" data-tab-action="close-current" data-i18n="context.closeCurrent">关闭当前标签页</button>
+      <button type="button" data-tab-action="close-left" data-i18n="context.closeLeft">关闭左侧标签页</button>
+      <button type="button" data-tab-action="close-right" data-i18n="context.closeRight">关闭右侧标签页</button>
       <div class="context-menu-separator"></div>
-      <button type="button" data-tab-action="close-all">关闭全部标签页</button>
+      <button type="button" data-tab-action="close-all" data-i18n="context.closeAll">关闭全部标签页</button>
     </div>
-    <div id="workspace-context-menu" class="context-menu hidden" role="menu" aria-label="文件菜单">
-      <button type="button" data-workspace-action="reveal">在文件管理器中显示</button>
+    <div id="workspace-context-menu" class="context-menu hidden" role="menu" aria-label="文件菜单" data-i18n-aria-label="context.fileMenu">
+      <button type="button" data-workspace-action="reveal" data-i18n="context.reveal.default">在文件管理器中显示</button>
       <div class="context-menu-separator"></div>
-      <button type="button" data-workspace-action="close-folder">关闭文件夹</button>
-      <button type="button" data-workspace-action="close-file">关闭文件</button>
+      <button type="button" data-workspace-action="close-folder" data-i18n="context.closeFolder">关闭文件夹</button>
+      <button type="button" data-workspace-action="close-file" data-i18n="context.closeFile">关闭文件</button>
     </div>
-    <div id="image-context-menu" class="context-menu hidden" role="menu" aria-label="图片菜单">
-      <button type="button" data-image-action="copy-image">复制图片</button>
+    <div id="image-context-menu" class="context-menu hidden" role="menu" aria-label="图片菜单" data-i18n-aria-label="context.imageMenu">
+      <button type="button" data-image-action="copy-image" data-i18n="context.copyImage">复制图片</button>
     </div>
     <div id="settings-backdrop" class="hidden">
-      <section id="typography-dialog" role="dialog" aria-modal="true" aria-labelledby="typography-title">
+      <section id="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header class="dialog-header">
           <div>
-            <h2 id="typography-title">主题字号</h2>
+            <h2 id="settings-title" data-i18n="settings.title">设置</h2>
+          </div>
+          <button id="settings-close" class="icon-button" type="button" aria-label="关闭" data-i18n-aria-label="common.close">×</button>
+        </header>
+        <div class="settings-body">
+          <section class="settings-section">
+            <div class="settings-section-copy">
+              <label for="settings-language-select" data-i18n="settings.languageTitle">语言</label>
+              <p data-i18n="settings.languageDescription">切换界面语言，选择会立即保存。</p>
+            </div>
+            <select id="settings-language-select" aria-label="语言" data-i18n-aria-label="language.aria"></select>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-copy">
+              <h3 data-i18n="settings.typographyTitle">主题字号</h3>
+              <p data-i18n="settings.typographyDescription">调整当前主题在预览和 DOCX 导出中的字号。</p>
+            </div>
+            <button id="settings-typography-open" class="settings-secondary-action" type="button" data-i18n="settings.openTypography">打开字号设置</button>
+          </section>
+          <section class="settings-section">
+            <div class="settings-section-copy">
+              <h3 data-i18n="settings.updatesTitle">更新</h3>
+              <p data-i18n="settings.updatesDescription">手动检查是否有可用的新版本。</p>
+              <p id="settings-update-status" class="settings-status" aria-live="polite"></p>
+            </div>
+            <button id="settings-check-update" class="settings-secondary-action" type="button" data-i18n="update.check">检查更新</button>
+          </section>
+        </div>
+        <footer class="dialog-actions">
+          <span class="dialog-spacer"></span>
+          <button id="settings-close-action" type="button" data-i18n="common.close">关闭</button>
+        </footer>
+      </section>
+      <section id="typography-dialog" class="hidden" role="dialog" aria-modal="true" aria-labelledby="typography-title">
+        <header class="dialog-header">
+          <div>
+            <h2 id="typography-title" data-i18n="typography.title">主题字号</h2>
             <p id="typography-theme-name"></p>
           </div>
-          <button id="typography-close" class="icon-button" aria-label="关闭">×</button>
+          <button id="typography-close" class="icon-button" aria-label="关闭" data-i18n-aria-label="common.close">×</button>
         </header>
         <div class="scope-row">
-          <label><input id="typography-preview-enabled" type="checkbox" /> 预览</label>
-          <label><input id="typography-export-enabled" type="checkbox" /> DOCX</label>
+          <label><input id="typography-preview-enabled" type="checkbox" /> <span data-i18n="typography.preview">预览</span></label>
+          <label><input id="typography-export-enabled" type="checkbox" /> <span data-i18n="typography.export">DOCX</span></label>
         </div>
         <div id="typography-fields"></div>
         <footer class="dialog-actions">
-          <button id="typography-reset" type="button">恢复默认</button>
+          <button id="typography-reset" type="button" data-i18n="typography.reset">恢复默认</button>
           <span class="dialog-spacer"></span>
-          <button id="typography-cancel" type="button">取消</button>
-          <button id="typography-save" type="button">保存</button>
+          <button id="typography-cancel" type="button" data-i18n="typography.cancel">取消</button>
+          <button id="typography-save" type="button" data-i18n="typography.save">保存</button>
         </footer>
       </section>
     </div>
@@ -142,10 +181,10 @@
       <section id="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title">
         <header class="dialog-header">
           <div>
-            <h2 id="update-title">发现新版本</h2>
+            <h2 id="update-title" data-i18n="update.title">发现新版本</h2>
             <p id="update-version"></p>
           </div>
-          <button id="update-close" class="icon-button" type="button" aria-label="关闭">×</button>
+          <button id="update-close" class="icon-button" type="button" aria-label="关闭" data-i18n-aria-label="common.close">×</button>
         </header>
         <div id="update-body">
           <p id="update-notes"></p>
@@ -153,14 +192,14 @@
             <div class="update-progress-track">
               <div id="update-progress-bar"></div>
             </div>
-            <div id="update-progress-text">准备下载</div>
+            <div id="update-progress-text" data-i18n="update.ready">准备下载</div>
           </div>
           <p id="update-error" class="hidden"></p>
         </div>
         <footer class="dialog-actions">
-          <button id="update-later" type="button">稍后再说</button>
+          <button id="update-later" type="button" data-i18n="update.later">稍后再说</button>
           <span class="dialog-spacer"></span>
-          <button id="update-install" type="button">立即更新</button>
+          <button id="update-install" type="button" data-i18n="update.install">立即更新</button>
         </footer>
       </section>
     </div>
@@ -168,16 +207,16 @@
       <section id="unsaved-dialog" role="dialog" aria-modal="true" aria-labelledby="unsaved-title">
         <header class="dialog-header">
           <div>
-            <h2 id="unsaved-title">保存更改</h2>
+            <h2 id="unsaved-title" data-i18n="unsaved.title">保存更改</h2>
             <p id="unsaved-file-name"></p>
           </div>
         </header>
-        <p id="unsaved-message">这个文档有未保存的更改。</p>
+        <p id="unsaved-message" data-i18n="unsaved.message">这个文档有未保存的更改。</p>
         <footer class="dialog-actions">
-          <button id="unsaved-discard" type="button" data-unsaved-action="discard">放弃更改</button>
+          <button id="unsaved-discard" type="button" data-unsaved-action="discard" data-i18n="unsaved.discard">放弃更改</button>
           <span class="dialog-spacer"></span>
-          <button id="unsaved-cancel" type="button" data-unsaved-action="cancel">取消</button>
-          <button id="unsaved-save" type="button" data-unsaved-action="save">保存</button>
+          <button id="unsaved-cancel" type="button" data-unsaved-action="cancel" data-i18n="unsaved.cancel">取消</button>
+          <button id="unsaved-save" type="button" data-unsaved-action="save" data-i18n="unsaved.save">保存</button>
         </footer>
       </section>
     </div>
