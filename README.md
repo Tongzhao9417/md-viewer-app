@@ -39,6 +39,16 @@ MD Viewer is not intended to replace the original extension. It is a focused des
 
 ![Export Menu](docs/screenshots/export-menu.png)
 
+## Next Version
+
+The next version explores an in-app Agent panel that stays beside the Markdown document. The goal is to make writing assistance feel like part of the reading and editing workspace: summarize the current document, adjust tone, continue a draft, or save the result without moving text into a separate chat window.
+
+This direction keeps the scope close to document-centered Markdown workflows: reading, drafting, rewriting, summarizing, and saving.
+
+![Next Version Agent Concept](docs/screenshots/agent-chat-next-version.png)
+
+HTML mockup: [Agent Chat Concept](docs/agent-chat-concept-en.html).
+
 ## Development
 
 Install dependencies:

@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Markdown Viewer Agent Chat Concept</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      :root {
+        color-scheme: light;
+        --bg: #d7ddd8;
+        --window: #fbfbf8;
+        --panel: #f3f4f1;
+        --panel-2: #ffffff;
+        --line: #deded7;
+        --line-strong: #c9c9c1;
+        --text: #222426;
+        --muted: #727772;
+        --soft: #eef1ed;
+        --accent: #3b6f65;
+        --accent-2: #5277d8;
+        --agent: #eaf4ef;
+        --user: #e9efff;
+        --warning: #b86d2c;
+        --shadow: rgba(40, 43, 42, 0.18);
+        font-family:
+          -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+          system-ui, sans-serif;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+        min-width: 1120px;
+        min-height: 760px;
+        overflow: hidden;
+        color: var(--text);
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.55), transparent 35%),
+          linear-gradient(160deg, #d9ddd3 0%, #bbc8cf 45%, #7ca9c5 100%);
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .app-window {
+        display: grid;
+        grid-template-columns: 270px minmax(520px, 1fr) 330px;
+        width: min(92vw, 1480px);
+        height: min(86vh, 880px);
+        min-height: 690px;
+        overflow: hidden;
+        background: var(--window);
+        border: 1px solid rgba(86, 88, 83, 0.34);
+        border-radius: 18px;
+        box-shadow:
+          0 24px 70px rgba(36, 41, 38, 0.28),
+          0 1px 0 rgba(255, 255, 255, 0.9) inset;
+      }
+
+      aside,
+      main {
+        min-width: 0;
+        min-height: 0;
+      }
+
+      .file-sidebar {
+        display: grid;
+        grid-template-rows: 62px 62px 1fr 52px;
+        background: rgba(244, 245, 242, 0.92);
+        border-right: 1px solid var(--line);
+      }
+
+      .traffic {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 0 20px;
+      }
+
+      .dot {
+        width: 13px;
+        height: 13px;
+        border-radius: 50%;
+      }
+
+      .red {
+        background: #ff5f57;
+      }
+
+      .yellow {
+        background: #ffbd2e;
+      }
+
+      .green {
+        background: #28c840;
+      }
+
+      .files-head,
+      .agent-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .files-title,
+      .agent-title {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 720;
+        letter-spacing: 0;
+      }
+
+      .icon-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #8c918c;
+        font-size: 18px;
+      }
+
+      .file-tree {
+        min-height: 0;
+        padding: 16px 12px;
+        overflow: hidden;
+      }
+
+      .tree-line,
+      .tree-file,
+      .tree-folder {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        min-width: 0;
+        padding: 0 10px;
+        color: #777d78;
+        border-radius: 8px;
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .tree-folder {
+        color: #535a55;
+        font-weight: 620;
+      }
+
+      .tree-file {
+        padding-left: 28px;
+      }
+
+      .tree-file.active {
+        color: #242725;
+        background: #e7e8e5;
+        box-shadow: inset 3px 0 0 #8c918c;
+      }
+
+      .tree-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .settings {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 18px;
+        color: #969b97;
+        border-top: 1px solid var(--line);
+        font-size: 13px;
+      }
+
+      .editor-pane {
+        position: relative;
+        display: grid;
+        grid-template-rows: 58px minmax(0, 1fr);
+        background: #fbfbf8;
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 20px;
+        padding: 0 34px;
+        border-bottom: 1px solid rgba(222, 222, 215, 0.72);
+      }
+
+      .doc-title {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-width: 0;
+        color: #4c514d;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .doc-title span:last-child {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .tool-button {
+        display: inline-grid;
+        place-items: center;
+        width: 28px;
+        height: 28px;
+        color: #767b76;
+        background: transparent;
+        border: 0;
+        border-radius: 7px;
+        font-size: 14px;
+      }
+
+      .tool-button.active {
+        color: var(--accent);
+        background: rgba(59, 111, 101, 0.1);
+      }
+
+      .scroll-area {
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .document {
+        width: min(820px, calc(100% - 80px));
+        margin: 0 auto;
+        padding: 46px 0 190px;
+      }
+
+      .document h1 {
+        margin: 0 0 18px;
+        color: #282a2c;
+        font-size: 44px;
+        line-height: 1.08;
+        letter-spacing: 0;
+      }
+
+      .document h2 {
+        margin: 38px 0 18px;
+        padding-bottom: 10px;
+        color: #303336;
+        border-bottom: 1px solid #e3e3de;
+        font-size: 28px;
+        line-height: 1.18;
+        letter-spacing: 0;
+      }
+
+      .document p {
+        margin: 0 0 20px;
+        color: #5f6462;
+        font-size: 17px;
+        line-height: 1.65;
+      }
+
+      .composer {
+        position: absolute;
+        right: 28px;
+        bottom: 24px;
+        left: 28px;
+        display: grid;
+        grid-template-rows: 1fr 34px;
+        gap: 12px;
+        min-height: 122px;
+        padding: 16px;
+        background: rgba(255, 255, 255, 0.88);
+        border: 1.5px solid #6384e9;
+        border-radius: 10px;
+        box-shadow:
+          0 18px 42px rgba(49, 70, 120, 0.14),
+          0 0 0 1px rgba(255, 255, 255, 0.6) inset;
+        backdrop-filter: blur(16px);
+      }
+
+      .composer-text {
+        color: #979d98;
+        font-size: 17px;
+        line-height: 1.4;
+      }
+
+      .composer-bottom {
+        display: grid;
+        grid-template-columns: auto 1fr auto auto;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        height: 29px;
+        padding: 0 12px;
+        color: #717873;
+        background: #f6f7f5;
+        border: 1px solid #e7e8e4;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 680;
+        white-space: nowrap;
+      }
+
+      .model-select {
+        justify-self: end;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 30px;
+        min-width: 194px;
+        padding: 0 12px;
+        color: #7a807b;
+        background: #f8f8f6;
+        border: 1px solid #e5e6e1;
+        border-radius: 8px;
+        font-size: 12px;
+        font-weight: 650;
+      }
+
+      .send {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        height: 32px;
+        color: #ffffff;
+        background: #6384e9;
+        border: 0;
+        border-radius: 50%;
+        font-size: 16px;
+      }
+
+      .agent-sidebar {
+        display: grid;
+        grid-template-rows: 62px minmax(0, 1fr) 84px;
+        background: #f7f8f5;
+        border-left: 1px solid var(--line);
+      }
+
+      .agent-head {
+        height: 62px;
+        border-bottom-color: #e2e3df;
+      }
+
+      .agent-title-wrap {
+        min-width: 0;
+      }
+
+      .agent-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .agent-subtitle {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 3px;
+        color: #858b86;
+        font-size: 11px;
+        white-space: nowrap;
+      }
+
+      .status-dot {
+        width: 7px;
+        height: 7px;
+        background: #2fb45a;
+        border-radius: 50%;
+      }
+
+      .agent-actions {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .small-icon {
+        display: grid;
+        place-items: center;
+        width: 26px;
+        height: 26px;
+        color: #7c827d;
+        background: transparent;
+        border: 1px solid transparent;
+        border-radius: 7px;
+        font-size: 14px;
+      }
+
+      .small-icon:hover {
+        background: #edefeb;
+        border-color: #e2e4de;
+      }
+
+      .chat-list {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 0;
+        padding: 18px 16px 20px;
+        overflow: hidden;
+      }
+
+      .day {
+        align-self: center;
+        padding: 3px 9px;
+        color: #8d938e;
+        background: #eceee9;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 680;
+      }
+
+      .message {
+        display: grid;
+        gap: 5px;
+        max-width: 86%;
+      }
+
+      .message.user {
+        align-self: flex-end;
+      }
+
+      .message.agent {
+        align-self: flex-start;
+      }
+
+      .bubble {
+        padding: 10px 12px;
+        border-radius: 16px;
+        font-size: 13px;
+        line-height: 1.45;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+      }
+
+      .user .bubble {
+        color: #25315a;
+        background: var(--user);
+        border-bottom-right-radius: 5px;
+      }
+
+      .agent .bubble {
+        color: #32433c;
+        background: var(--agent);
+        border-bottom-left-radius: 5px;
+      }
+
+      .meta {
+        color: #9a9f9a;
+        font-size: 10px;
+      }
+
+      .user .meta {
+        text-align: right;
+      }
+
+      .work-card {
+        margin-top: 7px;
+        padding: 9px;
+        background: rgba(255, 255, 255, 0.68);
+        border: 1px solid rgba(122, 153, 138, 0.2);
+        border-radius: 10px;
+      }
+
+      .work-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 22px;
+        color: #63716b;
+        font-size: 12px;
+      }
+
+      .work-row + .work-row {
+        margin-top: 4px;
+      }
+
+      .checkmark {
+        display: grid;
+        flex: 0 0 auto;
+        place-items: center;
+        width: 16px;
+        height: 16px;
+        color: #ffffff;
+        background: var(--accent);
+        border-radius: 50%;
+        font-size: 11px;
+        line-height: 1;
+      }
+
+      .thinking .bubble {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding-right: 14px;
+      }
+
+      .typing-dot {
+        width: 5px;
+        height: 5px;
+        background: #749085;
+        border-radius: 50%;
+      }
+
+      .agent-footer {
+        display: grid;
+        align-content: center;
+        gap: 8px;
+        padding: 12px 16px;
+        border-top: 1px solid var(--line);
+      }
+
+      .scope-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        color: #7b817c;
+        font-size: 12px;
+      }
+
+      .mini-progress {
+        width: 100%;
+        height: 5px;
+        overflow: hidden;
+        background: #e6e9e4;
+        border-radius: 999px;
+      }
+
+      .mini-progress span {
+        display: block;
+        width: 64%;
+        height: 100%;
+        background: linear-gradient(90deg, #3b6f65, #6384e9);
+      }
+
+      @media (max-width: 1240px) {
+        body {
+          min-width: 980px;
+        }
+
+        .app-window {
+          grid-template-columns: 238px minmax(460px, 1fr) 300px;
+          width: 96vw;
+        }
+
+        .document h1 {
+          font-size: 38px;
+        }
+
+        .document {
+          width: min(760px, calc(100% - 56px));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="app-window" aria-label="Markdown viewer concept">
+      <aside class="file-sidebar">
+        <div class="traffic" aria-hidden="true">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+        </div>
+
+        <div class="files-head">
+          <h2 class="files-title">Files</h2>
+          <div class="icon-row" aria-hidden="true">
+            <span>⌕</span>
+            <span>＋</span>
+          </div>
+        </div>
+
+        <nav class="file-tree" aria-label="文件列表">
+          <div class="tree-line">▾ <span class="tree-name">md-viewer-workspace</span></div>
+          <div class="tree-folder">▾ <span class="tree-name">docs</span></div>
+          <div class="tree-file">□ <span class="tree-name">getting-started.md</span></div>
+          <div class="tree-file active">□ <span class="tree-name">next-version-preview.md</span></div>
+          <div class="tree-folder">▾ <span class="tree-name">features</span></div>
+          <div class="tree-file">□ <span class="tree-name">theme-gallery.md</span></div>
+          <div class="tree-file">□ <span class="tree-name">outline-navigation.md</span></div>
+          <div class="tree-file">□ <span class="tree-name">mermaid-examples.md</span></div>
+          <div class="tree-folder">▾ <span class="tree-name">exports</span></div>
+          <div class="tree-file">□ <span class="tree-name">docx-notes.md</span></div>
+          <div class="tree-file">□ <span class="tree-name">html-print.md</span></div>
+        </nav>
+
+        <div class="settings">
+          <span>⚙</span>
+          <span>workspace</span>
+        </div>
+      </aside>
+
+      <main class="editor-pane">
+        <header class="topbar">
+          <div class="doc-title">
+            <span aria-hidden="true">▤</span>
+            <span>next-version-preview.md</span>
+          </div>
+          <div class="toolbar" aria-label="工具栏">
+            <button class="tool-button" type="button" aria-label="预览">◐</button>
+            <button class="tool-button active" type="button" aria-label="Agent">✦</button>
+            <button class="tool-button" type="button" aria-label="保存">⌘</button>
+          </div>
+        </header>
+
+        <div class="scroll-area">
+          <article class="document">
+            <h1>MD Viewer 下一版：文档旁边的 Agent</h1>
+            <p>
+              MD Viewer 的起点，是用更轻的方式打开目录、阅读 Markdown，而不必进入完整编辑器。
+              下一版会延续这个方向，把 Agent 放进同一个阅读工作区。
+            </p>
+            <p>文档仍然在中心，辅助能力只隔着一个侧边栏。</p>
+
+            <h2>理解当前文档的辅助</h2>
+            <p>
+              可以让 Agent 总结当前文件、解释某个段落、润色一段文字，或者为 README 准备说明文案。
+              Markdown 预览始终保持可见。
+            </p>
+
+            <p>
+              工作区仍然熟悉：左侧是文件浏览，中间是文档，右侧是对话。
+            </p>
+
+            <h2>仍然围绕 Markdown</h2>
+            <p>
+              主题、大纲、Mermaid 图表、标签页，以及 HTML / DOCX / PDF 导出仍然是一等能力。
+              Agent 会作为阅读器旁边的辅助，而不是替代阅读器本身。
+            </p>
+          </article>
+        </div>
+
+        <section class="composer" aria-label="Agent 输入框">
+          <div class="composer-text">询问 Agent 当前 Markdown 文档相关问题...</div>
+          <div class="composer-bottom">
+            <span class="pill">✦ Deep thinking</span>
+            <span></span>
+            <span class="model-select">Agent · 当前文档上下文 ▾</span>
+            <button class="send" type="button" aria-label="发送">↑</button>
+          </div>
+        </section>
+      </main>
+
+      <aside class="agent-sidebar" aria-label="Agent 对话历史">
+        <header class="agent-head">
+          <div class="agent-title-wrap">
+            <h2 class="agent-title">Agent</h2>
+            <div class="agent-subtitle">
+              <span class="status-dot"></span>
+              <span>本地会话已连接</span>
+            </div>
+          </div>
+          <div class="agent-actions" aria-label="对话操作">
+            <button class="small-icon" type="button" aria-label="新对话">＋</button>
+            <button class="small-icon" type="button" aria-label="收起">⌁</button>
+          </div>
+        </header>
+
+        <div class="chat-list">
+          <div class="day">今天</div>
+
+          <div class="message user">
+            <div class="bubble">帮 README 写一段简短的 Next Version 说明。</div>
+            <div class="meta">10:42</div>
+          </div>
+
+          <div class="message agent">
+            <div class="bubble">
+              已根据当前 Markdown 预览整理出一段简洁说明。
+              <div class="work-card">
+                <div class="work-row">
+                  <span class="checkmark">✓</span>
+                  <span>读取当前 Markdown 文档</span>
+                </div>
+                <div class="work-row">
+                  <span class="checkmark">✓</span>
+                  <span>生成 README 预告文案</span>
+                </div>
+              </div>
+            </div>
+            <div class="meta">10:43</div>
+          </div>
+
+          <div class="message user">
+            <div class="bubble">提到主题、大纲、Mermaid 和导出能力。</div>
+            <div class="meta">10:45</div>
+          </div>
+
+          <div class="message agent">
+            <div class="bubble">
+              已补充产品相关说明，并保持范围聚焦在 Markdown 工作流。
+            </div>
+            <div class="meta">10:45</div>
+          </div>
+
+          <div class="message user">
+            <div class="bubble">保存为下一版本预览文档。</div>
+            <div class="meta">10:47</div>
+          </div>
+
+          <div class="message agent thinking">
+            <div class="bubble">
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+              <span class="typing-dot"></span>
+            </div>
+            <div class="meta">正在处理</div>
+          </div>
+        </div>
+
+        <footer class="agent-footer">
+          <div class="scope-row">
+            <span>当前文档上下文</span>
+            <strong>next-version-preview.md</strong>
+          </div>
+          <div class="mini-progress" aria-hidden="true"><span></span></div>
+        </footer>
+      </aside>
+    </section>
+  </body>
+</html>
