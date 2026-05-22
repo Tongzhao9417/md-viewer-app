@@ -1,5 +1,3 @@
-import markdownit from "markdown-it";
-import hljs from "highlight.js";
 import {
   applyMarkdownTheme,
   getAvailableThemes,
@@ -26,10 +24,49 @@ import {
   t,
 } from "./i18n.js";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { initCopyHandler } from "./copy-handler.js";
 import { exportDOCX } from "./docx-exporter.js";
+import {
+  backToTopButton,
+  contentEl,
+  currentThemeId,
+  documentWorkspaceEl,
+  editorEl,
+  editorStatusEl,
+  emptyEl,
+  languageSelect,
+  readerContentEl,
+  saveMarkdownButton,
+  tabListEl,
+  themeSelect,
+} from "./dom.js";
+import { handleEditorKeyDown as handleMarkdownEditorKeyDown } from "./editor-behavior.js";
+import { copyImageToClipboard } from "./image-clipboard.js";
+import {
+  getMarkdownHeadingSourceLines,
+  getPortableMarkdownHTML,
+  renderMarkdown as renderMarkdownContent,
+} from "./markdown-content.js";
+import {
+  applyLineEnding,
+  detectLineEnding,
+  escapeHTML,
+  getBaseName,
+  getDirName,
+  getFileName,
+  getPathParts,
+  getPathRelativeToRoot,
+  isMarkdownPath,
+  isPathInsideRoot,
+  isSameLocalPath,
+  joinLocalPath,
+  joinPath,
+  normalizeMarkdownContent,
+  normalizePathSeparators,
+} from "./path-utils.js";
+import { applyDefaultSidebarWidth, initResizablePanels } from "./resizable-panels.js";
 
 const searchParams = new URLSearchParams(window.location.search);
 const isScreenshotDemo = searchParams.get("demo") === "screenshot";
@@ -45,52 +82,10 @@ const listen = window.__TAURI__?.event?.listen ?? (() => {});
 const getCurrentWebviewWindow = window.__TAURI__?.webviewWindow?.getCurrentWebviewWindow ?? (() => null);
 const getCurrentWindow = window.__TAURI__?.window?.getCurrentWindow ?? (() => ({ startDragging() {} }));
 
-const md = markdownit({
-  html: true,
-  linkify: true,
-  typographer: true,
-  highlight(str, lang) {
-    if (lang && hljs.getLanguage(lang)) {
-      try {
-        return hljs.highlight(str, { language: lang }).value;
-      } catch (_) {}
-    }
-    return "";
-  },
-});
-const defaultFenceRenderer = md.renderer.rules.fence;
-
-md.renderer.rules.fence = (tokens, idx, options, env, self) => {
-  const token = tokens[idx];
-  const language = String(token.info || "").trim().split(/\s+/)[0].toLowerCase();
-
-  if (language === "mermaid") {
-    return `<div class="mermaid-diagram"><pre class="mermaid-source"><code>${escapeHTML(token.content)}</code></pre></div>`;
-  }
-
-  if (typeof defaultFenceRenderer === "function") {
-    return defaultFenceRenderer(tokens, idx, options, env, self);
-  }
-
-  return `<pre><code>${escapeHTML(token.content)}</code></pre>`;
-};
-
-const contentEl = () => document.getElementById("markdown-content");
-const documentWorkspaceEl = () => document.getElementById("document-workspace");
-const editorEl = () => document.getElementById("markdown-editor");
-const emptyEl = () => document.getElementById("empty-state");
-const tabListEl = () => document.getElementById("tab-list");
-const themeSelect = () => document.getElementById("theme-select");
-const languageSelect = () => document.getElementById("settings-language-select");
-const readerContentEl = () => document.getElementById("reader-content");
-const backToTopButton = () => document.getElementById("back-to-top-btn");
-const saveMarkdownButton = () => document.getElementById("save-md-btn");
-const editorStatusEl = () => document.getElementById("editor-status");
-const currentThemeId = () => document.body.getAttribute("data-theme") || "default";
-
 let tabs = [];
 let activeTabId = null;
 let nextTabId = 1;
+let nextDraftId = 1;
 let workspace = null;
 let looseFiles = [];
 let contextTabId = null;
@@ -101,21 +96,10 @@ let isUpdateInstalling = false;
 let viewMode = "preview";
 let pendingPreviewRenderId = 0;
 let unsavedDecisionResolver = null;
-let mermaidModulePromise = null;
-let mermaidRenderCounter = 0;
 let settingsUpdateStatusKey = "";
 let settingsUpdateStatusParams = {};
 const collapsedWorkspaceDirs = new Set();
-const SIDEBAR_WIDTH_KEY = "md-viewer-sidebar-width-v2";
-const OUTLINE_HEIGHT_KEY = "md-viewer-outline-height";
 const VIEW_MODE_KEY = "md-viewer-view-mode";
-const DEFAULT_SIDEBAR_WIDTH = 288;
-const SIDEBAR_MIN_WIDTH = 248;
-const SIDEBAR_MAX_WIDTH = 560;
-const READER_MIN_WIDTH = 420;
-const WORKSPACE_MIN_HEIGHT = 132;
-const OUTLINE_MIN_HEIGHT = 96;
-const RESIZE_KEYBOARD_STEP = 18;
 const SCREENSHOT_DEMO_ROOT = "/Users/demo/Documents/Markdown Library";
 const UPDATE_CHECK_DELAY_MS = 1200;
 const BACK_TO_TOP_THRESHOLD = 260;
@@ -195,37 +179,6 @@ Markdown is often used as a lightweight writing format, but reading large folder
 2. Tabs make comparison and cross-reading faster.
 3. Export support keeps the reading workflow connected to sharing and publishing.`,
 };
-const BLOCK_TAGS = new Set([
-  "ADDRESS",
-  "ARTICLE",
-  "ASIDE",
-  "BLOCKQUOTE",
-  "DIV",
-  "DL",
-  "FIELDSET",
-  "FIGCAPTION",
-  "FIGURE",
-  "FOOTER",
-  "FORM",
-  "H1",
-  "H2",
-  "H3",
-  "H4",
-  "H5",
-  "H6",
-  "HEADER",
-  "HR",
-  "LI",
-  "MAIN",
-  "NAV",
-  "OL",
-  "P",
-  "PRE",
-  "SECTION",
-  "TABLE",
-  "UL",
-]);
-
 function syncLanguageSelect() {
   const select = languageSelect();
   if (select) select.value = getLocale();
@@ -280,7 +233,7 @@ function refreshLocalizedUI() {
   }
 
   const activeTab = getActiveTab();
-  setTitle(activeTab?.path || null, { dirty: Boolean(activeTab?.dirty) });
+  setTitle(activeTab, { dirty: Boolean(activeTab?.dirty) });
   renderWorkspaceFiles();
   renderDocumentOutline();
   updateEditorControls();
@@ -301,354 +254,37 @@ function initI18nControls() {
   });
 }
 
-function getDirName(path) {
-  const value = String(path || "").replace(/[\\/]+$/, "");
-  const index = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
-  if (index < 0) return "";
-  if (index === 0) return value.slice(0, 1);
-  if (index === 2 && /^[A-Za-z]:/.test(value)) return value.slice(0, 3);
-  return value.slice(0, index);
-}
-
-function isWindowsAbsolutePath(path) {
-  return /^[A-Za-z]:(?:[\\/]|%5[cC]|%2[fF])/.test(String(path || ""));
-}
-
-function isLocalAbsolutePath(path) {
-  const value = String(path || "");
-  return value.startsWith("/") || value.startsWith("\\\\") || isWindowsAbsolutePath(value);
-}
-
-function usesWindowsPath(path) {
-  const value = String(path || "");
-  return isWindowsAbsolutePath(value) || value.includes("\\");
-}
-
-function splitImageSrcSuffix(src) {
-  const queryIndex = src.indexOf("?");
-  const hashIndex = src.indexOf("#");
-  const suffixIndex = [queryIndex, hashIndex]
-    .filter((index) => index >= 0)
-    .sort((a, b) => a - b)[0];
-
-  if (suffixIndex === undefined) {
-    return { pathPart: src, suffix: "" };
-  }
-
-  return {
-    pathPart: src.slice(0, suffixIndex),
-    suffix: src.slice(suffixIndex),
-  };
-}
-
-function decodeImagePath(path) {
-  try {
-    return decodeURI(path).replace(/%5[cC]/g, "\\").replace(/%2[fF]/g, "/");
-  } catch (_) {
-    return String(path || "").replace(/%5[cC]/g, "\\").replace(/%2[fF]/g, "/");
-  }
-}
-
-function fileUrlToPath(src) {
-  try {
-    const url = new URL(src);
-    if (url.protocol !== "file:") return null;
-
-    let pathname = decodeURIComponent(url.pathname);
-    if (url.host) {
-      return `\\\\${url.host}${pathname.replace(/\//g, "\\")}`;
-    }
-    if (/^\/[A-Za-z]:\//.test(pathname)) {
-      pathname = pathname.slice(1).replace(/\//g, "\\");
-    }
-    return pathname;
-  } catch (_) {
-    return null;
-  }
-}
-
-function normalizeLocalPath(path, preferWindows = false) {
-  const separator = preferWindows ? "\\" : "/";
-  const uncMatch = String(path || "").match(/^[\\/]{2}([^\\/]+)[\\/]+([^\\/]+)(.*)$/);
-
-  if (preferWindows && uncMatch) {
-    const [, server, share, rest = ""] = uncMatch;
-    const parts = [];
-    rest
-      .replace(/^[\\/]+/, "")
-      .replace(/[\\/]+/g, "/")
-      .split("/")
-      .forEach((part) => {
-        if (!part || part === ".") return;
-        if (part === "..") {
-          if (parts.length) parts.pop();
-          return;
-        }
-        parts.push(part);
-      });
-
-    return `\\\\${server}\\${share}${parts.length ? `\\${parts.join("\\")}` : ""}`;
-  }
-
-  const normalized = String(path || "").replace(/[\\/]+/g, "/");
-  const hasDrive = /^[A-Za-z]:\//.test(normalized);
-  const isAbsolute = normalized.startsWith("/");
-  const prefix = hasDrive ? normalized.slice(0, 3) : isAbsolute ? "/" : "";
-  const parts = [];
-
-  normalized
-    .slice(prefix.length)
-    .split("/")
-    .forEach((part) => {
-      if (!part || part === ".") return;
-      if (part === "..") {
-        if (parts.length && parts[parts.length - 1] !== "..") {
-          parts.pop();
-        } else if (!prefix) {
-          parts.push(part);
-        }
-        return;
-      }
-      parts.push(part);
-    });
-
-  const body = parts.join(separator);
-  if (hasDrive) {
-    const drivePrefix = prefix.replace("/", separator);
-    return body ? `${drivePrefix}${body}` : drivePrefix;
-  }
-  if (isAbsolute) return body ? `${separator}${body}` : separator;
-  return body;
-}
-
-function joinLocalPath(baseDir, relativePath) {
-  const preferWindows = usesWindowsPath(baseDir);
-  const separator = preferWindows ? "\\" : "/";
-  const joined = `${String(baseDir || "").replace(/[\\/]+$/, "")}${separator}${relativePath}`;
-  return normalizeLocalPath(joined, preferWindows);
-}
-
-function shouldPreserveImageSrc(src) {
-  const value = String(src || "").trim();
-  if (!value || value.startsWith("#") || value.startsWith("//")) return true;
-  if (isWindowsAbsolutePath(value)) return false;
-  if (/^file:/i.test(value)) return false;
-  if (isWindowsAbsolutePath(decodeImagePath(value))) return false;
-  return /^[A-Za-z][A-Za-z\d+.-]*:/.test(value);
-}
-
-function resolveLocalImagePath(src, documentPath) {
-  const { pathPart, suffix } = splitImageSrcSuffix(String(src || "").trim());
-  if (!pathPart || shouldPreserveImageSrc(pathPart)) return null;
-
-  if (/^file:/i.test(pathPart)) {
-    const filePath = fileUrlToPath(pathPart);
-    return filePath ? { path: filePath, suffix } : null;
-  }
-
-  const decodedPath = decodeImagePath(pathPart);
-  if (isLocalAbsolutePath(decodedPath)) {
-    return {
-      path: normalizeLocalPath(decodedPath, usesWindowsPath(decodedPath)),
-      suffix,
-    };
-  }
-
-  const baseDir = getDirName(documentPath);
-  if (!baseDir) return null;
-
-  return {
-    path: joinLocalPath(baseDir, decodedPath),
-    suffix,
-  };
-}
-
-async function rewriteMarkdownImageSources(documentPath) {
-  if (!isTauriRuntime) return;
-
-  const images = Array.from(contentEl().querySelectorAll("img[src]"));
-
-  await Promise.all(images.map(async (img) => {
-    const originalSrc = img.getAttribute("src");
-    const resolved = resolveLocalImagePath(originalSrc, documentPath);
-    if (!resolved) return;
-
-    let imagePath = resolved.path;
-    if (isLocalAbsolutePath(imagePath)) {
-      imagePath = await invoke("resolve_image_path", {
-        path: imagePath,
-        documentPath,
-        workspaceRoot: workspace?.root || null,
-      }) || imagePath;
-    }
-
-    img.dataset.mdOriginalSrc = originalSrc;
-    img.dataset.mdResolvedPath = imagePath;
-    img.src = `${convertFileSrc(imagePath)}${resolved.suffix}`;
-  }));
-}
-
-function getPortableMarkdownHTML() {
-  const clone = contentEl().cloneNode(true);
-  clone.querySelectorAll("img[data-md-original-src]").forEach((img) => {
-    img.setAttribute("src", img.dataset.mdOriginalSrc);
-    img.removeAttribute("data-md-original-src");
-    img.removeAttribute("data-md-resolved-path");
-  });
-  return clone.innerHTML;
-}
-
-function getMermaidSource(diagram) {
-  return diagram.querySelector(".mermaid-source code")?.textContent?.trim() || "";
-}
-
-function getMermaidConfig() {
-  const themeDefinition = getCurrentThemeDefinition();
-  const colors = themeDefinition.colorScheme;
-  const contentStyle = window.getComputedStyle(contentEl());
-
-  return {
-    startOnLoad: false,
-    securityLevel: "strict",
-    suppressErrorRendering: true,
-    theme: themeDefinition.category === "dark" ? "dark" : "default",
-    themeVariables: {
-      fontFamily: contentStyle.fontFamily,
-      background: colors.background.page,
-      primaryColor: colors.background.surface || colors.background.page,
-      primaryTextColor: colors.text.primary,
-      primaryBorderColor: colors.table.border,
-      lineColor: colors.table.border,
-    },
-  };
-}
-
-async function getMermaid() {
-  mermaidModulePromise ||= import("mermaid").then((module) => module.default);
-  return mermaidModulePromise;
-}
-
-function showMermaidError(diagram, source, error) {
-  const message = document.createElement("div");
-  message.className = "mermaid-error";
-  message.textContent = t("mermaid.renderFailed", { message: getErrorMessage(error) });
-
-  const pre = document.createElement("pre");
-  const code = document.createElement("code");
-  code.textContent = source;
-  pre.appendChild(code);
-
-  diagram.replaceChildren(message, pre);
-}
-
-async function renderMermaidDiagrams() {
-  const diagrams = Array.from(contentEl().querySelectorAll(".mermaid-diagram"));
-  if (!diagrams.length) return;
-
-  let mermaid;
-  try {
-    mermaid = await getMermaid();
-    mermaid.initialize(getMermaidConfig());
-  } catch (error) {
-    diagrams.forEach((diagram) => {
-      const source = getMermaidSource(diagram);
-      diagram.classList.add("is-error");
-      showMermaidError(diagram, source, error);
-    });
-    return;
-  }
-
-  await Promise.all(diagrams.map(async (diagram) => {
-    const source = getMermaidSource(diagram);
-    if (!source) return;
-
-    const renderId = `mdv-mermaid-${++mermaidRenderCounter}`;
-    diagram.classList.add("is-rendering");
-    diagram.classList.remove("is-error", "is-rendered");
-
-    try {
-      const { svg, bindFunctions } = await mermaid.render(renderId, source);
-      if (!diagram.isConnected) return;
-      diagram.innerHTML = svg;
-      diagram.classList.add("is-rendered");
-      bindFunctions?.(diagram);
-    } catch (error) {
-      if (!diagram.isConnected) return;
-      diagram.classList.add("is-error");
-      showMermaidError(diagram, source, error);
-    } finally {
-      diagram.classList.remove("is-rendering");
-    }
-  }));
-}
-
 async function renderMarkdown(raw, filePath = getActiveTab()?.path) {
-  const html = md.render(raw);
-  contentEl().innerHTML = html;
-  await rewriteMarkdownImageSources(filePath);
-  await renderMermaidDiagrams();
-  documentWorkspaceEl().hidden = false;
-  emptyEl().style.display = "none";
-  renderDocumentOutline();
-  updateBackToTopButton();
+  await renderMarkdownContent(raw, {
+    filePath,
+    invoke,
+    isTauriRuntime,
+    workspaceRoot: workspace?.root || null,
+    afterRender() {
+      renderDocumentOutline();
+      updateBackToTopButton();
+    },
+  });
 }
 
-function normalizeMarkdownContent(content) {
-  return String(content ?? "").replace(/\r\n?/g, "\n");
+function getTabDisplayName(tab) {
+  if (!tab) return "";
+  return tab.path ? getFileName(tab.path) : tab.draftName || t("workspace.untitled");
 }
 
-function detectLineEnding(content) {
-  const match = String(content ?? "").match(/\r\n|\r|\n/);
-  return match?.[0] || "\n";
+function getNextDraftName() {
+  const number = nextDraftId++;
+  if (number === 1) return t("workspace.untitled");
+  return t("workspace.untitledNumbered", { number });
 }
 
-function applyLineEnding(content, lineEnding = "\n") {
-  const normalized = normalizeMarkdownContent(content);
-  if (lineEnding === "\n") return normalized;
-  return normalized.replace(/\n/g, lineEnding);
-}
-
-function setTitle(filePath, { dirty = false } = {}) {
-  if (!filePath) {
+function setTitle(tab, { dirty = false } = {}) {
+  if (!tab) {
     document.title = t("app.name");
     return;
   }
-  const name = getFileName(filePath);
-  document.title = `${dirty ? "* " : ""}${name} — ${t("app.name")}`;
-}
-
-function escapeHTML(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function getFileName(path) {
-  return path ? path.split(/[\\/]/).pop() : "";
-}
-
-function getBaseName(path) {
-  if (!path) return "";
-  return path.split(/[\\/]/).filter(Boolean).pop() || path;
-}
-
-function getPathParts(path) {
-  return String(path || "").split(/[\\/]/).filter(Boolean);
-}
-
-function normalizePathSeparators(path) {
-  return String(path || "").replace(/\\/g, "/");
-}
-
-function normalizeComparablePath(path) {
-  return normalizePathSeparators(path).replace(/\/+$/, "");
-}
-
-function isSameLocalPath(a, b) {
-  return normalizeComparablePath(a) === normalizeComparablePath(b);
+  const name = getTabDisplayName(tab);
+  document.title = (dirty ? "* " : "") + name + " — " + t("app.name");
 }
 
 function getRuntimePlatform() {
@@ -660,42 +296,6 @@ function getRevealActionLabel() {
   if (/win/i.test(platform)) return t("context.reveal.win");
   if (/mac/i.test(platform)) return t("context.reveal.mac");
   return t("context.reveal.default");
-}
-
-function joinPath(base, relative) {
-  if (!relative) return base;
-  const separator = String(base || "").includes("\\") ? "\\" : "/";
-  const normalizedBase = String(base || "").replace(/[\\/]+$/, "");
-  const normalizedRelative = String(relative || "").replace(/^[\\/]+/, "").replace(/[\\/]/g, separator);
-  return `${normalizedBase}${separator}${normalizedRelative}`;
-}
-
-function isPathInsideRoot(path, root) {
-  const normalizedPath = normalizePathSeparators(path);
-  const normalizedRoot = normalizePathSeparators(root).replace(/\/+$/, "");
-  return Boolean(
-    normalizedPath &&
-      normalizedRoot &&
-      (normalizedPath === normalizedRoot || normalizedPath.startsWith(`${normalizedRoot}/`)),
-  );
-}
-
-function getPathRelativeToRoot(path, root) {
-  const normalizedPath = normalizePathSeparators(path);
-  const normalizedRoot = normalizePathSeparators(root).replace(/\/+$/, "");
-  return normalizedPath.startsWith(`${normalizedRoot}/`)
-    ? normalizedPath.slice(normalizedRoot.length + 1)
-    : getFileName(path);
-}
-
-function clampSize(value, min, max) {
-  const numeric = Number.parseFloat(value);
-  if (!Number.isFinite(numeric)) return min;
-  return Math.min(Math.max(numeric, min), max);
-}
-
-function isMarkdownPath(path) {
-  return /\.(md|markdown|mdx|mkd)$/i.test(path);
 }
 
 function getActiveTab() {
@@ -757,12 +357,6 @@ function scrollActiveViewToTop() {
   }
 
   window.setTimeout(updateBackToTopButton, 320);
-}
-
-function getMarkdownHeadingSourceLines(raw) {
-  return md.parse(raw || "", {})
-    .filter((token) => token.type === "heading_open")
-    .map((token) => token.map?.[0] ?? null);
 }
 
 function getLineStartOffset(value, lineIndex) {
@@ -1254,6 +848,7 @@ function ensureFileTracked(path) {
       a.relative_path.toLowerCase().localeCompare(b.relative_path.toLowerCase()),
     );
   }
+  ensureWorkspaceDirExpanded(getPathRelativeToRoot(path, workspace.root));
 
   renderWorkspaceFiles();
 }
@@ -1262,11 +857,11 @@ function pruneClosedLooseFiles(closedPaths = []) {
   const closed = new Set(closedPaths);
   if (!closed.size) return;
 
-  const openPaths = new Set(tabs.map((tab) => tab.path));
+  const openPaths = new Set(tabs.map((tab) => tab.path).filter(Boolean));
   const beforeCount = looseFiles.length;
   looseFiles = looseFiles.filter((file) => {
     if (!closed.has(file.path)) return true;
-    if (openPaths.has(file.path)) return true;
+    if (file.path && openPaths.has(file.path)) return true;
     return workspace && isPathInsideRoot(file.path, workspace.root);
   });
 
@@ -1284,9 +879,8 @@ function updateSidePanel() {
 }
 
 function initScreenshotDemo() {
-  const shell = document.getElementById("app-shell");
   const sidePanel = document.getElementById("side-panel");
-  shell?.style.setProperty("--side-panel-width", `${DEFAULT_SIDEBAR_WIDTH}px`);
+  applyDefaultSidebarWidth();
   sidePanel?.style.setProperty("--outline-panel-height", "230px");
 
   setWorkspace({
@@ -1328,6 +922,7 @@ function initScreenshotDemo() {
 }
 
 function getTabByPath(path) {
+  if (!path) return null;
   return tabs.find((t) => t.path === path);
 }
 
@@ -1340,7 +935,7 @@ function renderTabBar() {
         if (tab.id === activeTabId) classes.push("active");
         if (tab.dirty) classes.push("dirty");
         if (tab.externalContent !== null) classes.push("conflicted");
-        const fileName = getFileName(tab.path);
+        const fileName = getTabDisplayName(tab);
         const title = escapeHTML(fileName);
         const closeLabel = escapeHTML(t("common.close"));
         return (
@@ -1426,603 +1021,11 @@ function applyEditorEdit(nextValue, selectionStart, selectionEnd = selectionStar
   editor.scrollTop = scrollTop;
 }
 
-function getLineBounds(value, position) {
-  const safePosition = Math.min(Math.max(position, 0), value.length);
-  const lineStart = value.lastIndexOf("\n", safePosition - 1) + 1;
-  const nextBreak = value.indexOf("\n", safePosition);
-  const lineEnd = nextBreak === -1 ? value.length : nextBreak;
-  return {
-    lineStart,
-    lineEnd,
-    line: value.slice(lineStart, lineEnd),
-  };
-}
-
-function getSelectedLineRange(value, selectionStart, selectionEnd) {
-  const lineStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
-  const effectiveEnd =
-    selectionEnd > selectionStart && value[selectionEnd - 1] === "\n"
-      ? selectionEnd - 1
-      : selectionEnd;
-  const nextBreak = value.indexOf("\n", effectiveEnd);
-  return {
-    lineStart,
-    lineEnd: nextBreak === -1 ? value.length : nextBreak,
-  };
-}
-
-function mapPositionThroughLineChanges(position, rangeStart, originalLines, lineChanges) {
-  const relativePosition = Math.max(0, position - rangeStart);
-  let originalOffset = 0;
-  let nextOffset = 0;
-
-  for (let index = 0; index < originalLines.length; index += 1) {
-    const originalLine = originalLines[index];
-    const change = lineChanges[index];
-    const originalLineEnd = originalOffset + originalLine.length;
-
-    if (relativePosition <= originalLineEnd) {
-      const positionInLine = relativePosition - originalOffset;
-      let nextPositionInLine = positionInLine;
-
-      if (change.delta !== 0) {
-        if (positionInLine > change.changeAt) {
-          nextPositionInLine = Math.max(change.changeAt, positionInLine + change.delta);
-        } else if (positionInLine === change.changeAt && change.delta > 0) {
-          nextPositionInLine += change.delta;
-        }
-      }
-
-      return rangeStart + nextOffset + nextPositionInLine;
-    }
-
-    originalOffset = originalLineEnd + 1;
-    nextOffset += change.text.length + 1;
-  }
-
-  return rangeStart + lineChanges.map((change) => change.text).join("\n").length;
-}
-
-function replaceSelectedLines(transformLine) {
-  const editor = editorEl();
-  if (!editor) return;
-
-  const value = editor.value;
-  const selectionStart = editor.selectionStart;
-  const selectionEnd = editor.selectionEnd;
-  const range = getSelectedLineRange(value, selectionStart, selectionEnd);
-  const originalSegment = value.slice(range.lineStart, range.lineEnd);
-  const originalLines = originalSegment.split("\n");
-  const lineChanges = originalLines.map(transformLine);
-  const nextSegment = lineChanges.map((change) => change.text).join("\n");
-  const nextValue = value.slice(0, range.lineStart) + nextSegment + value.slice(range.lineEnd);
-  const nextSelectionStart = mapPositionThroughLineChanges(
-    selectionStart,
-    range.lineStart,
-    originalLines,
-    lineChanges,
-  );
-  const nextSelectionEnd =
-    selectionStart === selectionEnd
-      ? nextSelectionStart
-      : mapPositionThroughLineChanges(selectionEnd, range.lineStart, originalLines, lineChanges);
-
-  applyEditorEdit(nextValue, nextSelectionStart, nextSelectionEnd);
-}
-
-function isInsideFencedCodeBlock(value, lineStart) {
-  const lines = value.slice(0, lineStart).split("\n");
-  let fence = null;
-
-  for (const line of lines) {
-    const match = line.match(/^[ \t]*(`{3,}|~{3,})/);
-    if (!match) continue;
-
-    const marker = match[1][0];
-    if (!fence) {
-      fence = marker;
-    } else if (marker === fence) {
-      fence = null;
-    }
-  }
-
-  return Boolean(fence);
-}
-
-function getListContinuation(line) {
-  const match = line.match(/^((?:[ \t]*>[ \t]?)*)([ \t]*)(?:(\d+)([.)])|([-+*]))([ \t]+)(?:\[([ xX])\][ \t]+)?/);
-  if (!match) return null;
-
-  const quotePrefix = match[1] || "";
-  const indent = match[2] || "";
-  const markerEnd = match[0].length;
-  const content = line.slice(markerEnd);
-  const isOrdered = match[3] !== undefined;
-  const isTask = match[7] !== undefined;
-  const nextPrefix = isOrdered
-    ? `${quotePrefix}${indent}${Number(match[3]) + 1}${match[4]}${match[6]}`
-    : `${quotePrefix}${indent}${match[5]}${match[6]}${isTask ? "[ ] " : ""}`;
-
-  return {
-    markerEnd,
-    content,
-    emptyPrefix: `${quotePrefix}${indent}`,
-    nextPrefix,
-  };
-}
-
-function handleMarkdownEnter(event) {
-  const editor = event.currentTarget;
-  if (editor.selectionStart !== editor.selectionEnd) return false;
-
-  const value = editor.value;
-  const position = editor.selectionStart;
-  const { lineStart, lineEnd, line } = getLineBounds(value, position);
-  const positionInLine = position - lineStart;
-  const beforeCursor = line.slice(0, positionInLine);
-  const afterCursor = line.slice(positionInLine);
-  const restAfterCursor = value.slice(position);
-  const fenceMatch = beforeCursor.match(/^([ \t]*)(`{3,}|~{3,})[^`~]*$/);
-
-  if (fenceMatch && restAfterCursor.match(/^\n\n[ \t]*(`{3,}|~{3,})/)) {
-    event.preventDefault();
-    editor.setSelectionRange(position + 1, position + 1);
-    return true;
-  }
-
-  if (fenceMatch && afterCursor.trim() === "") {
-    const indent = fenceMatch[1] || "";
-    const fence = fenceMatch[2];
-    const closingFence = fence[0].repeat(fence.length);
-    const insertion = `\n${indent}\n${indent}${closingFence}`;
-    const nextPosition = position + 1 + indent.length;
-    event.preventDefault();
-    applyEditorEdit(value.slice(0, position) + insertion + value.slice(position), nextPosition);
-    return true;
-  }
-
-  if (isInsideFencedCodeBlock(value, lineStart)) return false;
-
-  const listContinuation = getListContinuation(line);
-  if (listContinuation && positionInLine >= listContinuation.markerEnd) {
-    event.preventDefault();
-
-    if (listContinuation.content.trim() === "") {
-      const nextLine = listContinuation.emptyPrefix;
-      const nextValue = value.slice(0, lineStart) + nextLine + value.slice(lineEnd);
-      applyEditorEdit(nextValue, lineStart + nextLine.length);
-      return true;
-    }
-
-    const insertion = `\n${listContinuation.nextPrefix}`;
-    const nextPosition = position + insertion.length;
-    applyEditorEdit(value.slice(0, position) + insertion + value.slice(position), nextPosition);
-    return true;
-  }
-
-  const quoteMatch = line.match(/^((?:[ \t]*>[ \t]?)+)(.*)$/);
-  if (quoteMatch && positionInLine >= quoteMatch[1].length) {
-    event.preventDefault();
-
-    if (quoteMatch[2].trim() === "") {
-      const nextValue = value.slice(0, lineStart) + value.slice(lineEnd);
-      applyEditorEdit(nextValue, lineStart);
-      return true;
-    }
-
-    const insertion = `\n${quoteMatch[1]}`;
-    applyEditorEdit(value.slice(0, position) + insertion + value.slice(position), position + insertion.length);
-    return true;
-  }
-
-  return false;
-}
-
-function handleMarkdownBackspace(event) {
-  const editor = event.currentTarget;
-  if (editor.selectionStart !== editor.selectionEnd) return false;
-
-  const value = editor.value;
-  const position = editor.selectionStart;
-  const { lineStart, lineEnd, line } = getLineBounds(value, position);
-  const positionInLine = position - lineStart;
-  const listContinuation = getListContinuation(line);
-
-  if (
-    listContinuation &&
-    listContinuation.content.trim() === "" &&
-    positionInLine >= listContinuation.markerEnd
-  ) {
-    event.preventDefault();
-    const exitsRootList = listContinuation.emptyPrefix === "" && lineStart > 0;
-    const nextLine = exitsRootList ? "\n" : listContinuation.emptyPrefix;
-    const suffixStart = exitsRootList && value[lineEnd] === "\n" ? lineEnd + 1 : lineEnd;
-    const nextValue = value.slice(0, lineStart) + nextLine + value.slice(suffixStart);
-    applyEditorEdit(nextValue, lineStart + nextLine.length);
-    return true;
-  }
-
-  return false;
-}
-
-function getMarkdownBasePrefix(line) {
-  return line.match(/^((?:[ \t]*>[ \t]?)*[ \t]*)/)?.[1] || "";
-}
-
-function getListMarkerMatch(line, type = "any") {
-  const patterns = {
-    ordered: /^((?:[ \t]*>[ \t]?)*[ \t]*)\d+[.)][ \t]+/,
-    unordered: /^((?:[ \t]*>[ \t]?)*[ \t]*)[-+*][ \t]+(?!\[[ xX]\][ \t]+)/,
-    task: /^((?:[ \t]*>[ \t]?)*[ \t]*)[-+*][ \t]+\[[ xX]\][ \t]+/,
-    any: /^((?:[ \t]*>[ \t]?)*[ \t]*)(?:(?:\d+[.)]|[-+*])[ \t]+(?:\[[ xX]\][ \t]+)?)/,
-  };
-  return line.match(patterns[type]);
-}
-
-function getListMarker(type, number) {
-  if (type === "ordered") return `${number}. `;
-  if (type === "task") return "- [ ] ";
-  return "- ";
-}
-
-function toggleMarkdownList(type) {
-  const editor = editorEl();
-  if (!editor) return;
-
-  const value = editor.value;
-  const range = getSelectedLineRange(value, editor.selectionStart, editor.selectionEnd);
-  const lines = value.slice(range.lineStart, range.lineEnd).split("\n");
-  const nonEmptyLines = lines.filter((line) => line.trim() !== "");
-  const shouldRemove = nonEmptyLines.length > 0 && nonEmptyLines.every((line) => getListMarkerMatch(line, type));
-  let itemNumber = 1;
-
-  replaceSelectedLines((line) => {
-    if (line.trim() === "") {
-      return { text: line, changeAt: 0, delta: 0 };
-    }
-
-    const existingMarker = getListMarkerMatch(line, shouldRemove ? type : "any");
-    const basePrefix = existingMarker?.[1] ?? getMarkdownBasePrefix(line);
-    const marker = shouldRemove ? "" : getListMarker(type, itemNumber);
-    const contentStart = existingMarker ? existingMarker[0].length : basePrefix.length;
-    const nextLine = `${basePrefix}${marker}${line.slice(contentStart)}`;
-    itemNumber += 1;
-
-    return {
-      text: nextLine,
-      changeAt: basePrefix.length,
-      delta: nextLine.length - line.length,
-    };
-  });
-}
-
-function adjustMarkdownIndent(outdent = false) {
-  replaceSelectedLines((line) => {
-    if (!outdent) {
-      return {
-        text: `  ${line}`,
-        changeAt: 0,
-        delta: 2,
-      };
-    }
-
-    if (line.startsWith("  ")) {
-      return {
-        text: line.slice(2),
-        changeAt: 0,
-        delta: -2,
-      };
-    }
-
-    if (line.startsWith("\t") || line.startsWith(" ")) {
-      return {
-        text: line.slice(1),
-        changeAt: 0,
-        delta: -1,
-      };
-    }
-
-    return { text: line, changeAt: 0, delta: 0 };
-  });
-}
-
-function applyInlineMarkdown(open, close = open, placeholder = "text") {
-  const editor = editorEl();
-  if (!editor) return;
-
-  const value = editor.value;
-  const selectionStart = editor.selectionStart;
-  const selectionEnd = editor.selectionEnd;
-  const selectedText = value.slice(selectionStart, selectionEnd);
-
-  if (selectedText.startsWith(open) && selectedText.endsWith(close) && selectedText.length >= open.length + close.length) {
-    const innerText = selectedText.slice(open.length, selectedText.length - close.length);
-    const nextValue = value.slice(0, selectionStart) + innerText + value.slice(selectionEnd);
-    applyEditorEdit(nextValue, selectionStart, selectionStart + innerText.length);
-    return;
-  }
-
-  const text = selectedText || placeholder;
-  const replacement = `${open}${text}${close}`;
-  const nextValue = value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
-  const nextSelectionStart = selectionStart + open.length;
-  applyEditorEdit(nextValue, nextSelectionStart, nextSelectionStart + text.length);
-}
-
-function applyMarkdownLink() {
-  const editor = editorEl();
-  if (!editor) return;
-
-  const value = editor.value;
-  const selectionStart = editor.selectionStart;
-  const selectionEnd = editor.selectionEnd;
-  const selectedText = value.slice(selectionStart, selectionEnd);
-  const existingLink = selectedText.match(/^\[([^\]]*)\]\(([^)]*)\)$/);
-
-  if (existingLink) {
-    const nextValue = value.slice(0, selectionStart) + existingLink[1] + value.slice(selectionEnd);
-    applyEditorEdit(nextValue, selectionStart, selectionStart + existingLink[1].length);
-    return;
-  }
-
-  const isSelectedUrl = /^https?:\/\//i.test(selectedText.trim());
-  const label = isSelectedUrl ? "link" : selectedText || "text";
-  const url = isSelectedUrl ? selectedText.trim() : "url";
-  const replacement = `[${label}](${url})`;
-  const nextValue = value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
-  const urlStart = selectionStart + label.length + 3;
-  applyEditorEdit(nextValue, urlStart, urlStart + url.length);
-}
-
-function isAsciiWordCharacter(char) {
-  return /[A-Za-z0-9_]/.test(char || "");
-}
-
-function shouldPairSingleUnderscore(value, selectionStart, selectionEnd) {
-  if (selectionStart !== selectionEnd) return true;
-  return !isAsciiWordCharacter(value[selectionStart - 1]) && !isAsciiWordCharacter(value[selectionEnd]);
-}
-
-function handleFenceCompletion(event) {
-  if (event.metaKey || event.ctrlKey || event.altKey) return false;
-  if (event.key !== "`" && event.key !== "~") return false;
-
-  const editor = event.currentTarget;
-  if (editor.selectionStart !== editor.selectionEnd) return false;
-
-  const value = editor.value;
-  const position = editor.selectionStart;
-  const { line, lineStart } = getLineBounds(value, position);
-  const positionInLine = position - lineStart;
-  const beforeCursor = line.slice(0, positionInLine);
-  const afterCursor = line.slice(positionInLine);
-  const marker = event.key.repeat(2);
-  const fence = event.key.repeat(3);
-  const fencePrefix = beforeCursor.match(/^[ \t]*/)?.[0] || "";
-
-  if (beforeCursor !== `${fencePrefix}${marker}` || afterCursor !== "") return false;
-
-  event.preventDefault();
-  const insertion = `${event.key}\n\n${fencePrefix}${fence}`;
-  const nextValue = value.slice(0, position) + insertion + value.slice(position);
-  applyEditorEdit(nextValue, position + 1);
-  return true;
-}
-
-function handlePairCompletion(event) {
-  if (event.metaKey || event.ctrlKey || event.altKey) return false;
-  if (handleFenceCompletion(event)) return true;
-
-  const editor = event.currentTarget;
-  const markdownDelimiterKeys = new Set(["*", "_", "~"]);
-  const pairs = {
-    "(": ")",
-    "[": "]",
-    "{": "}",
-  };
-  const closers = new Set(Object.values(pairs));
-  const value = editor.value;
-  const selectionStart = editor.selectionStart;
-  const selectionEnd = editor.selectionEnd;
-
-  if (markdownDelimiterKeys.has(event.key)) {
-    if (
-      event.key === "*" &&
-      selectionStart === selectionEnd &&
-      value.slice(selectionStart - 2, selectionStart) === "**" &&
-      value.slice(selectionStart, selectionStart + 2) === "**"
-    ) {
-      event.preventDefault();
-      const nextValue =
-        value.slice(0, selectionStart) +
-        "*" +
-        value.slice(selectionStart, selectionStart + 2) +
-        "*" +
-        value.slice(selectionStart + 2);
-      applyEditorEdit(nextValue, selectionStart + 1);
-      return true;
-    }
-
-    if (
-      event.key === "*" &&
-      selectionStart === selectionEnd &&
-      value[selectionStart] === "*" &&
-      value[selectionStart - 1] === "*" &&
-      value[selectionStart - 2] === "*"
-    ) {
-      event.preventDefault();
-      editor.setSelectionRange(selectionStart + 1, selectionStart + 1);
-      return true;
-    }
-
-    if (
-      event.key === "*" &&
-      selectionStart === selectionEnd &&
-      value[selectionStart - 1] === "*" &&
-      value[selectionStart - 2] === "*" &&
-      value[selectionStart] !== "*"
-    ) {
-      event.preventDefault();
-      const selectedText = value.slice(selectionStart, selectionEnd);
-      const closingDelimiter = event.key.repeat(3);
-      const replacement = `${event.key}${selectedText}${closingDelimiter}`;
-      const nextValue = value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
-      const nextSelectionStart = selectionStart + 1;
-      applyEditorEdit(nextValue, nextSelectionStart, nextSelectionStart + selectedText.length);
-      return true;
-    }
-
-    if (
-      event.key === "*" &&
-      selectionStart === selectionEnd &&
-      value.slice(selectionStart, selectionStart + 3) === "***"
-    ) {
-      event.preventDefault();
-      editor.setSelectionRange(selectionStart + 1, selectionStart + 1);
-      return true;
-    }
-
-    if (
-      event.key === "_" &&
-      selectionStart === selectionEnd &&
-      value[selectionStart - 1] === "_" &&
-      value[selectionStart] === "_" &&
-      value[selectionStart + 1] !== "_" &&
-      !isAsciiWordCharacter(value[selectionStart - 2]) &&
-      !isAsciiWordCharacter(value[selectionStart + 1])
-    ) {
-      event.preventDefault();
-      const nextValue = value.slice(0, selectionStart) + "_" + value.slice(selectionStart) + "_";
-      applyEditorEdit(nextValue, selectionStart + 1);
-      return true;
-    }
-
-    if (
-      selectionStart === selectionEnd &&
-      value[selectionStart] === event.key &&
-      (value[selectionStart - 1] !== event.key || value[selectionStart - 2] !== event.key)
-    ) {
-      event.preventDefault();
-      editor.setSelectionRange(selectionStart + 1, selectionStart + 1);
-      return true;
-    }
-
-    if (event.key === "_" && shouldPairSingleUnderscore(value, selectionStart, selectionEnd)) {
-      event.preventDefault();
-      const selectedText = value.slice(selectionStart, selectionEnd);
-      const replacement = `_${selectedText}_`;
-      const nextValue = value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
-      const nextSelectionStart = selectionStart + 1;
-      applyEditorEdit(nextValue, nextSelectionStart, nextSelectionStart + selectedText.length);
-      return true;
-    }
-
-    if (
-      value[selectionStart - 1] === event.key &&
-      value[selectionStart - 2] !== event.key &&
-      value[selectionStart] !== event.key
-    ) {
-      event.preventDefault();
-      const selectedText = value.slice(selectionStart, selectionEnd);
-      const closingDelimiter = event.key.repeat(2);
-      const replacement = `${event.key}${selectedText}${closingDelimiter}`;
-      const nextValue = value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
-      const nextSelectionStart = selectionStart + 1;
-      applyEditorEdit(nextValue, nextSelectionStart, nextSelectionStart + selectedText.length);
-      return true;
-    }
-  }
-
-  if (closers.has(event.key) && selectionStart === selectionEnd && value[selectionStart] === event.key) {
-    event.preventDefault();
-    editor.setSelectionRange(selectionStart + 1, selectionStart + 1);
-    return true;
-  }
-
-  if (!pairs[event.key]) return false;
-
-  event.preventDefault();
-  const selectedText = value.slice(selectionStart, selectionEnd);
-  const replacement = `${event.key}${selectedText}${pairs[event.key]}`;
-  const nextValue = value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
-  const nextSelectionStart = selectionStart + event.key.length;
-  const nextSelectionEnd = nextSelectionStart + selectedText.length;
-  applyEditorEdit(nextValue, nextSelectionStart, nextSelectionEnd);
-  return true;
-}
-
-function handleEditorShortcut(event) {
-  const key = event.key.toLowerCase();
-  const hasPrimaryModifier = event.metaKey || event.ctrlKey;
-
-  if (!hasPrimaryModifier || event.altKey) return false;
-
-  if (event.shiftKey && key === "7") {
-    event.preventDefault();
-    toggleMarkdownList("ordered");
-    return true;
-  }
-
-  if (event.shiftKey && key === "8") {
-    event.preventDefault();
-    toggleMarkdownList("unordered");
-    return true;
-  }
-
-  if (event.shiftKey && key === "x") {
-    event.preventDefault();
-    toggleMarkdownList("task");
-    return true;
-  }
-
-  if (event.shiftKey) return false;
-
-  if (key === "b") {
-    event.preventDefault();
-    applyInlineMarkdown("**", "**", "bold");
-    return true;
-  }
-
-  if (key === "i") {
-    event.preventDefault();
-    applyInlineMarkdown("_", "_", "italic");
-    return true;
-  }
-
-  if (key === "e") {
-    event.preventDefault();
-    applyInlineMarkdown("`", "`", "code");
-    return true;
-  }
-
-  if (key === "k") {
-    event.preventDefault();
-    applyMarkdownLink();
-    return true;
-  }
-
-  return false;
-}
-
 function handleEditorKeyDown(event) {
-  if (event.isComposing) return;
-
-  if (event.key === "Enter" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    if (handleMarkdownEnter(event)) return;
-  }
-
-  if (event.key === "Backspace" && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    if (handleMarkdownBackspace(event)) return;
-  }
-
-  if (event.key === "Tab" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    event.preventDefault();
-    adjustMarkdownIndent(event.shiftKey);
-    return;
-  }
-
-  if (handleEditorShortcut(event)) return;
-  handlePairCompletion(event);
+  handleMarkdownEditorKeyDown(event, {
+    getEditorElement: editorEl,
+    applyEditorEdit,
+  });
 }
 
 function setViewMode(mode, { persist = true, focusEditor = false } = {}) {
@@ -2077,23 +1080,38 @@ function updateEditorControls() {
   });
 
   if (saveButton) {
-    saveButton.disabled = !tab || !tab.dirty || tab.saving;
+    saveButton.disabled = !tab || tab.saving || (!tab.isDraft && !tab.dirty);
   }
 
   const status = editorStatusEl();
   if (status) {
     if (!tab) status.textContent = "";
     else if (tab.saving) status.textContent = t("editor.status.saving");
+    else if (tab.isDraft) status.textContent = t("editor.status.draft");
     else if (tab.externalContent !== null) status.textContent = t("editor.status.externalModified");
     else if (tab.dirty) status.textContent = t("editor.status.unsaved");
     else status.textContent = t("editor.status.saved");
   }
 
   if (tab) {
-    setTitle(tab.path, { dirty: tab.dirty });
+    setTitle(tab, { dirty: tab.dirty });
   }
   document.body.classList.toggle("has-unsaved-documents", tabs.some((item) => item.dirty));
   updateBackToTopButton();
+}
+
+async function chooseMarkdownSavePath(tab) {
+  const selected = await save({
+    title: t("dialog.saveMarkdown"),
+    defaultPath: getNewMarkdownDefaultPath(tab),
+    filters: [
+      { name: t("filter.markdown"), extensions: ["md", "markdown", "mdx", "mkd"] },
+    ],
+    canCreateDirectories: true,
+  });
+
+  if (typeof selected !== "string" || !selected) return "";
+  return ensureMarkdownFileExtension(selected);
 }
 
 function updateTabDirtyState(tab) {
@@ -2112,6 +1130,8 @@ function replaceTabContentFromDisk(tab, rawContent) {
   tab.content = normalized;
   tab.savedContent = normalized;
   tab.lineEnding = detectLineEnding(rawContent);
+  tab.isDraft = false;
+  tab.draftName = "";
   tab.dirty = false;
   tab.externalContent = null;
   tab.externalLineEnding = null;
@@ -2129,16 +1149,37 @@ async function saveTab(tab = getActiveTab()) {
   if (!tab || tab.saving) return false;
 
   const draftAtSave = tab.content;
+  let targetPath = "";
+  try {
+    targetPath = tab.path || await chooseMarkdownSavePath(tab);
+  } catch (error) {
+    console.error("Failed to choose Markdown save path:", error);
+    window.alert(t("alert.saveFailed", { message: getErrorMessage(error) }));
+    return false;
+  }
+  if (!targetPath) return false;
+
+  const existingTarget = getTabByPath(targetPath);
+  if (existingTarget && existingTarget.id !== tab.id) {
+    window.alert(t("alert.savePathAlreadyOpen", { name: getFileName(targetPath) }));
+    switchToTab(existingTarget.id);
+    return false;
+  }
+
   tab.saving = true;
   renderTabBar();
   updateEditorControls();
 
   try {
     const contents = applyLineEnding(draftAtSave, tab.lineEnding || "\n");
-    const result = await invoke("save_markdown_file", { path: tab.path, contents });
+    const command = tab.isDraft ? "write_markdown_file" : "save_markdown_file";
+    const result = await invoke(command, { path: targetPath, contents });
     const savedRawContent = result?.content ?? contents;
     const savedContent = normalizeMarkdownContent(savedRawContent);
 
+    tab.path = result?.path || targetPath;
+    tab.isDraft = false;
+    tab.draftName = "";
     tab.savedContent = savedContent;
     tab.lineEnding = detectLineEnding(savedRawContent);
     tab.externalContent = null;
@@ -2156,6 +1197,8 @@ async function saveTab(tab = getActiveTab()) {
     } else {
       tab.dirty = tab.content !== tab.savedContent;
     }
+
+    ensureFileTracked(tab.path);
 
     return true;
   } catch (error) {
@@ -2257,7 +1300,7 @@ function switchToTab(tabId) {
   applyTabTheme(tab);
   syncEditorFromTab(tab);
   renderMarkdown(tab.content);
-  setTitle(tab.path, { dirty: tab.dirty });
+  setTitle(tab, { dirty: tab.dirty });
   renderTabBar();
   updateExportButton();
   updateSidePanel();
@@ -2294,6 +1337,8 @@ function createTab(path, content) {
   tabs.push({
     id,
     path,
+    draftName: "",
+    isDraft: false,
     content: normalizedContent,
     savedContent: normalizedContent,
     lineEnding: detectLineEnding(content),
@@ -2308,9 +1353,32 @@ function createTab(path, content) {
   switchToTab(id);
 }
 
+function createDraftTab() {
+  const id = "tab-" + nextTabId++;
+  tabs.push({
+    id,
+    path: "",
+    draftName: getNextDraftName(),
+    isDraft: true,
+    content: "",
+    savedContent: "",
+    lineEnding: "\n",
+    dirty: false,
+    saving: false,
+    externalContent: null,
+    externalLineEnding: null,
+    scrollY: 0,
+    editorScrollY: 0,
+    themeId: currentThemeId(),
+  });
+  switchToTab(id);
+  setViewMode("edit", { focusEditor: true });
+}
+
 function resetAllTabs() {
   tabs = [];
   activeTabId = null;
+  nextDraftId = 1;
   cancelPendingPreviewRender();
   editorEl().value = "";
   contentEl().innerHTML = "";
@@ -2340,7 +1408,7 @@ function requestUnsavedDecision(tab) {
     return Promise.resolve(window.confirm(t("unsaved.confirmDiscard")) ? "discard" : "cancel");
   }
 
-  fileName.textContent = getFileName(tab.path);
+  fileName.textContent = getTabDisplayName(tab);
   message.textContent = t("unsaved.closeMessage");
   backdrop.classList.remove("hidden");
 
@@ -2373,7 +1441,7 @@ async function confirmTabsCanClose(tabIds) {
 function closeTabsNow(tabIds, fallbackIndex = 0, fallbackTabId = null) {
   const ids = new Set(tabIds);
   if (!ids.size) return;
-  const closedPaths = tabs.filter((tab) => ids.has(tab.id)).map((tab) => tab.path);
+  const closedPaths = tabs.filter((tab) => ids.has(tab.id)).map((tab) => tab.path).filter(Boolean);
 
   const current = getActiveTab();
   if (current) {
@@ -2416,7 +1484,7 @@ async function closeTab(tabId) {
 }
 
 async function clearAllTabs() {
-  const closedPaths = tabs.map((tab) => tab.path);
+  const closedPaths = tabs.map((tab) => tab.path).filter(Boolean);
   const ids = tabs.map((tab) => tab.id);
   if (!(await confirmTabsCanClose(ids))) return;
   resetAllTabs();
@@ -2501,7 +1569,7 @@ async function runTabContextAction(action, targetTabId = contextTabId) {
 }
 
 function getTabsInFolder(folderPath) {
-  return tabs.filter((tab) => isPathInsideRoot(tab.path, folderPath));
+  return tabs.filter((tab) => tab.path && isPathInsideRoot(tab.path, folderPath));
 }
 
 function isWorkspaceRootPath(path) {
@@ -2606,140 +1674,9 @@ async function runWorkspaceContextAction(action) {
   }
 }
 
-function getImageMimeType(pathOrUrl) {
-  const cleanValue = String(pathOrUrl || "").split(/[?#]/)[0].toLowerCase();
-  if (cleanValue.endsWith(".png")) return "image/png";
-  if (cleanValue.endsWith(".jpg") || cleanValue.endsWith(".jpeg")) return "image/jpeg";
-  if (cleanValue.endsWith(".gif")) return "image/gif";
-  if (cleanValue.endsWith(".webp")) return "image/webp";
-  if (cleanValue.endsWith(".svg")) return "image/svg+xml";
-  if (cleanValue.endsWith(".bmp")) return "image/bmp";
-  if (cleanValue.endsWith(".ico")) return "image/x-icon";
-  if (cleanValue.endsWith(".avif")) return "image/avif";
-  if (cleanValue.endsWith(".tif") || cleanValue.endsWith(".tiff")) return "image/tiff";
-  return "";
-}
-
-async function readLocalImageBlob(image) {
-  const path = image?.dataset?.mdResolvedPath;
-  if (!isTauriRuntime || !path) return null;
-
-  try {
-    const bytes = await invoke("read_image_file", { path });
-    return new Blob([new Uint8Array(bytes)], { type: getImageMimeType(path) });
-  } catch (_) {
-    return null;
-  }
-}
-
-function loadImageElementFromBlob(blob) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    const image = new Image();
-
-    image.onload = () => {
-      URL.revokeObjectURL(url);
-      resolve(image);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error(t("image.loadFailed")));
-    };
-    image.src = url;
-  });
-}
-
-async function getDrawableImageFromBlob(blob) {
-  if (typeof createImageBitmap === "function") {
-    try {
-      return await createImageBitmap(blob);
-    } catch (_) {
-      // Some image formats, such as SVG, need to be loaded through an Image element.
-    }
-  }
-
-  return loadImageElementFromBlob(blob);
-}
-
-async function getDrawableImageSource(image) {
-  const localBlob = await readLocalImageBlob(image);
-  if (localBlob) {
-    return getDrawableImageFromBlob(localBlob);
-  }
-
-  const imageUrl = image.currentSrc || image.src;
-
-  if (imageUrl) {
-    try {
-      const response = await fetch(imageUrl);
-      if (response.ok) {
-        const blob = await response.blob();
-        return getDrawableImageFromBlob(blob);
-      }
-    } catch (_) {
-      // Fall back to drawing the already-rendered image element.
-    }
-  }
-
-  if (!image.complete) {
-    await image.decode();
-  }
-
-  return image;
-}
-
-function imageToPngBlob(image) {
-  return new Promise((resolve, reject) => {
-    (async () => {
-      const source = await getDrawableImageSource(image);
-      const width = source.naturalWidth || source.width || image.naturalWidth;
-      const height = source.naturalHeight || source.height || image.naturalHeight;
-
-      if (!width || !height) {
-        throw new Error(t("image.noPixels"));
-      }
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) throw new Error(t("image.cannotProcess"));
-
-      try {
-        ctx.drawImage(source, 0, 0, width, height);
-      } finally {
-        if (typeof source.close === "function") source.close();
-      }
-
-      canvas.toBlob((blob) => {
-        if (blob) resolve(blob);
-        else reject(new Error(t("image.encodeFailed")));
-      }, "image/png");
-    })().catch(reject);
-  });
-}
-
-async function copyImageToClipboard(image) {
-  if (!image) return;
-  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
-    throw new Error(t("image.unsupportedClipboard"));
-  }
-
-  const pngBlob = imageToPngBlob(image);
-  let clipboardItem;
-  try {
-    clipboardItem = new ClipboardItem({ "image/png": pngBlob });
-  } catch (_) {
-    clipboardItem = new ClipboardItem({ "image/png": await pngBlob });
-  }
-
-  await navigator.clipboard.write([clipboardItem]);
-}
-
 async function runImageContextAction(action, image = contextImageTarget) {
   if (action === "copy-image") {
-    await copyImageToClipboard(image);
+    await copyImageToClipboard(image, { invoke, isTauriRuntime });
   }
 }
 
@@ -2992,7 +1929,7 @@ function initUpdateDialog() {
 function getActiveFileName() {
   const tab = tabs.find((t) => t.id === activeTabId);
   if (!tab) return "document";
-  return getFileName(tab.path).replace(/\.[^.]+$/, "");
+  return getTabDisplayName(tab).replace(/\.[^.]+$/, "");
 }
 
 function getExportDefaultPath(extension) {
@@ -3001,6 +1938,18 @@ function getExportDefaultPath(extension) {
   const sourceDir = getDirName(getActiveTab()?.path);
 
   return sourceDir ? joinLocalPath(sourceDir, fileName) : fileName;
+}
+
+function getNewMarkdownDefaultPath(tab = getActiveTab()) {
+  const fileName = `${getTabDisplayName(tab) || t("workspace.untitled")}.md`;
+  const sourceDir = workspace?.root || getDirName(tab?.path || getActiveTab()?.path);
+  return sourceDir ? joinLocalPath(sourceDir, fileName) : fileName;
+}
+
+function ensureMarkdownFileExtension(path) {
+  if (isMarkdownPath(path)) return path;
+  const fileName = getFileName(path);
+  return /\.[^./\\]+$/.test(fileName) ? path : `${path}.md`;
 }
 
 function getContentCSS() {
@@ -3703,11 +2652,17 @@ async function refreshWorkspace() {
   await loadWorkspace(workspace.root);
 }
 
+function createMarkdownFile() {
+  createDraftTab();
+}
+
 function initWorkspaceNavigation() {
   const workspaceBrowser = document.getElementById("workspace-browser");
+  const newButton = document.getElementById("new-markdown-btn");
   const openButton = document.getElementById("open-workspace-btn");
   const refreshButton = document.getElementById("refresh-workspace-btn");
 
+  newButton?.addEventListener("click", createMarkdownFile);
   openButton?.addEventListener("click", chooseWorkspace);
   refreshButton?.addEventListener("click", refreshWorkspace);
 
@@ -3745,419 +2700,12 @@ function initTabScrolling() {
   }, { passive: false });
 }
 
-function getSidebarWidthBounds() {
-  const maxWidth = Math.max(
-    SIDEBAR_MIN_WIDTH,
-    Math.min(SIDEBAR_MAX_WIDTH, window.innerWidth - READER_MIN_WIDTH),
-  );
-
-  return {
-    min: SIDEBAR_MIN_WIDTH,
-    max: maxWidth,
-  };
-}
-
-function setSidebarWidth(width, { persist = true } = {}) {
-  const shell = document.getElementById("app-shell");
-  if (!shell) return;
-
-  const bounds = getSidebarWidthBounds();
-  const nextWidth = clampSize(width, bounds.min, bounds.max);
-  shell.style.setProperty("--side-panel-width", `${Math.round(nextWidth)}px`);
-
-  if (persist) {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(nextWidth)));
-  }
-}
-
-function getOutlineHeightBounds() {
-  const workspaceSection = document.getElementById("workspace-section");
-  const outlineSection = document.getElementById("outline-section");
-  if (!workspaceSection || !outlineSection) {
-    return { min: OUTLINE_MIN_HEIGHT, max: OUTLINE_MIN_HEIGHT };
-  }
-
-  const workspaceHeight = workspaceSection.getBoundingClientRect().height;
-  const outlineHeight = outlineSection.getBoundingClientRect().height;
-  const adjustableHeight = workspaceHeight + outlineHeight;
-
-  return {
-    min: OUTLINE_MIN_HEIGHT,
-    max: Math.max(OUTLINE_MIN_HEIGHT, adjustableHeight - WORKSPACE_MIN_HEIGHT),
-  };
-}
-
-function setOutlineHeight(height, { persist = true } = {}) {
-  const sidePanel = document.getElementById("side-panel");
-  if (!sidePanel) return;
-
-  const bounds = getOutlineHeightBounds();
-  const nextHeight = clampSize(height, bounds.min, bounds.max);
-  sidePanel.style.setProperty("--outline-panel-height", `${Math.round(nextHeight)}px`);
-
-  if (persist) {
-    localStorage.setItem(OUTLINE_HEIGHT_KEY, String(Math.round(nextHeight)));
-  }
-}
-
-function startResize(className, onMove) {
-  document.body.classList.add(className);
-
-  const stopResize = () => {
-    document.body.classList.remove(className);
-    document.removeEventListener("pointermove", onMove);
-    document.removeEventListener("pointerup", stopResize);
-    document.removeEventListener("pointercancel", stopResize);
-  };
-
-  document.addEventListener("pointermove", onMove);
-  document.addEventListener("pointerup", stopResize);
-  document.addEventListener("pointercancel", stopResize);
-}
-
-function initResizablePanels() {
-  const sidebarResizer = document.getElementById("sidebar-resizer");
-  const outlineResizer = document.getElementById("outline-resizer");
-
-  const savedSidebarWidth = Number.parseFloat(localStorage.getItem(SIDEBAR_WIDTH_KEY));
-  if (Number.isFinite(savedSidebarWidth)) {
-    setSidebarWidth(savedSidebarWidth, { persist: false });
-  } else {
-    setSidebarWidth(DEFAULT_SIDEBAR_WIDTH, { persist: false });
-  }
-
-  requestAnimationFrame(() => {
-    const savedOutlineHeight = Number.parseFloat(localStorage.getItem(OUTLINE_HEIGHT_KEY));
-    if (Number.isFinite(savedOutlineHeight)) {
-      setOutlineHeight(savedOutlineHeight, { persist: false });
-    }
-  });
-
-  sidebarResizer?.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-
-    const sidePanel = document.getElementById("side-panel");
-    const startX = e.clientX;
-    const startWidth = sidePanel?.getBoundingClientRect().width || SIDEBAR_MIN_WIDTH;
-
-    startResize("is-resizing-sidebar", (moveEvent) => {
-      setSidebarWidth(startWidth + moveEvent.clientX - startX);
-    });
-  });
-
-  sidebarResizer?.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-
-    const sidePanel = document.getElementById("side-panel");
-    const currentWidth = sidePanel?.getBoundingClientRect().width || SIDEBAR_MIN_WIDTH;
-    setSidebarWidth(currentWidth + (e.key === "ArrowRight" ? RESIZE_KEYBOARD_STEP : -RESIZE_KEYBOARD_STEP));
-  });
-
-  sidebarResizer?.addEventListener("dblclick", () => {
-    document.getElementById("app-shell")?.style.removeProperty("--side-panel-width");
-    localStorage.removeItem(SIDEBAR_WIDTH_KEY);
-  });
-
-  outlineResizer?.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-
-    const outlineSection = document.getElementById("outline-section");
-    const startY = e.clientY;
-    const startHeight = outlineSection?.getBoundingClientRect().height || OUTLINE_MIN_HEIGHT;
-
-    startResize("is-resizing-outline", (moveEvent) => {
-      setOutlineHeight(startHeight - (moveEvent.clientY - startY));
-    });
-  });
-
-  outlineResizer?.addEventListener("keydown", (e) => {
-    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-    e.preventDefault();
-
-    const outlineSection = document.getElementById("outline-section");
-    const currentHeight = outlineSection?.getBoundingClientRect().height || OUTLINE_MIN_HEIGHT;
-    setOutlineHeight(currentHeight + (e.key === "ArrowUp" ? RESIZE_KEYBOARD_STEP : -RESIZE_KEYBOARD_STEP));
-  });
-
-  outlineResizer?.addEventListener("dblclick", () => {
-    document.getElementById("side-panel")?.style.removeProperty("--outline-panel-height");
-    localStorage.removeItem(OUTLINE_HEIGHT_KEY);
-  });
-
-  let resizeFrame = 0;
-  window.addEventListener("resize", () => {
-    cancelAnimationFrame(resizeFrame);
-    resizeFrame = requestAnimationFrame(() => {
-      const sidePanel = document.getElementById("side-panel");
-      const outlineSection = document.getElementById("outline-section");
-      if (sidePanel) setSidebarWidth(sidePanel.getBoundingClientRect().width, { persist: false });
-      if (outlineSection) setOutlineHeight(outlineSection.getBoundingClientRect().height, { persist: false });
-    });
-  });
-}
-
-function isBlockNode(node) {
-  return node?.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(node.tagName);
-}
-
-function removeCopyWhitespaceNodes(root) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      if (node.parentElement?.closest("pre, code")) {
-        return NodeFilter.FILTER_REJECT;
-      }
-      if (node.nodeValue.trim() !== "") {
-        return NodeFilter.FILTER_REJECT;
-      }
-
-      const parent = node.parentElement;
-      const isBetweenBlocks = (!node.previousSibling || isBlockNode(node.previousSibling)) &&
-        (!node.nextSibling || isBlockNode(node.nextSibling));
-
-      return (parent === root || isBlockNode(parent)) && isBetweenBlocks
-        ? NodeFilter.FILTER_ACCEPT
-        : NodeFilter.FILTER_REJECT;
-    },
-  });
-  const nodes = [];
-  let node = walker.nextNode();
-  while (node) {
-    nodes.push(node);
-    node = walker.nextNode();
-  }
-  nodes.forEach((textNode) => textNode.remove());
-}
-
-function removeEmptyCopyBlocks(root) {
-  root.querySelectorAll("p, h1, h2, h3, h4, h5, h6, li, blockquote").forEach((el) => {
-    if (el.closest("pre, code")) return;
-    if (el.querySelector("img, table, hr, input, br")) return;
-
-    const text = el.textContent.replace(/\u00a0/g, " ").trim();
-    if (!text) {
-      el.remove();
-    }
-  });
-}
-
-function resetCopiedBlockSpacing(root) {
-  root.querySelectorAll("p, h1, h2, h3, h4, h5, h6, ul, ol, li, blockquote, pre").forEach((el) => {
-    el.style.marginTop = "0";
-    el.style.marginBottom = "0";
-    el.style.paddingTop = "0";
-    el.style.paddingBottom = "0";
-  });
-}
-
-function normalizeCopiedPlainText(text) {
-  return text
-    .replace(/\r\n?/g, "\n")
-    .replace(/\u00a0/g, " ")
-    .split("\n")
-    .map((line) => line.replace(/[ \t]+$/g, ""))
-    .filter((line) => line.trim() !== "")
-    .join("\n")
-    .trim();
-}
-
-function prepareCopyFragment(wrapper) {
-  removeCopyWhitespaceNodes(wrapper);
-  removeEmptyCopyBlocks(wrapper);
-}
-
-function compactCopyFragmentSpacing(wrapper) {
-  resetCopiedBlockSpacing(wrapper);
-  wrapper.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((el) => {
-    el.style.marginTop = "6pt";
-  });
-}
-
-function markFirstCopyBlock(wrapper) {
-  const firstBlock = Array.from(wrapper.children).find((el) => {
-    if (!isBlockNode(el)) return false;
-    if (el.querySelector("img, table, hr, input")) return true;
-    return el.textContent.replace(/\u00a0/g, " ").trim() !== "";
-  });
-
-  if (firstBlock) {
-    firstBlock.classList.add("first-copy-block");
-  }
-}
-
-function prepareAcademicCopyFragment(wrapper) {
-  wrapper.querySelectorAll("[style]").forEach((el) => el.removeAttribute("style"));
-
-  wrapper.querySelectorAll("p").forEach((el) => {
-    el.className = "MsoBodyText";
-  });
-
-  wrapper.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((el) => {
-    el.className = `MsoHeading${el.tagName.slice(1)}`;
-  });
-
-  wrapper.querySelectorAll("ul, ol").forEach((el) => {
-    el.className = "MsoList";
-  });
-
-  wrapper.querySelectorAll("li").forEach((el) => {
-    el.className = "MsoListItem";
-  });
-
-  wrapper.querySelectorAll("li > p").forEach((el) => {
-    el.className = "MsoListText";
-  });
-
-  wrapper.querySelectorAll("blockquote").forEach((el) => {
-    el.className = "MsoQuote";
-  });
-
-  wrapper.querySelectorAll("pre").forEach((el) => {
-    el.className = "MsoPre";
-  });
-
-  markFirstCopyBlock(wrapper);
-}
-
-function createWordHtml(bodyHtml) {
-  return `<!doctype html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-<meta charset="UTF-8">
-<style>
-html, body {
-  margin: 0cm;
-  padding: 0cm;
-}
-body {
-  color: #000000;
-  font-family: "Times New Roman", SimSun, serif;
-  font-size: 12.0pt;
-}
-p.MsoBodyText {
-  margin: 0cm;
-  text-indent: 24.0pt;
-  mso-char-indent-count: 2.0;
-  line-height: 150%;
-  font-family: "Times New Roman", SimSun, serif;
-  font-size: 12.0pt;
-}
-h1, h2, h3, h4, h5, h6 {
-  text-indent: 0cm;
-  line-height: 150%;
-  font-family: Arial, SimHei, sans-serif;
-  font-weight: bold;
-  page-break-after: avoid;
-}
-h1.MsoHeading1 {
-  margin: 0cm;
-  font-size: 22.0pt;
-}
-h2.MsoHeading2 {
-  margin: 0cm;
-  font-size: 16.0pt;
-}
-h3.MsoHeading3 {
-  margin: 0cm;
-  font-size: 14.0pt;
-}
-h4.MsoHeading4,
-h5.MsoHeading5,
-h6.MsoHeading6 {
-  margin: 0cm;
-  font-size: 12.0pt;
-}
-.first-copy-block {
-  margin-top: 0cm !important;
-}
-ul.MsoList,
-ol.MsoList {
-  margin: 0cm 0cm 0cm 24.0pt;
-  padding-left: 18.0pt;
-}
-li.MsoListItem {
-  margin: 0cm;
-  text-indent: 0cm;
-  line-height: 150%;
-  font-family: "Times New Roman", SimSun, serif;
-  font-size: 12.0pt;
-}
-li.MsoListItem p.MsoListText {
-  margin: 0cm;
-  text-indent: 0cm;
-  line-height: 150%;
-}
-blockquote.MsoQuote {
-  margin: 0cm 0cm 0cm 24.0pt;
-  padding: 0cm;
-  line-height: 150%;
-  font-family: "Times New Roman", SimSun, serif;
-  font-size: 12.0pt;
-}
-blockquote.MsoQuote p {
-  text-indent: 0cm;
-}
-table {
-  border-collapse: collapse;
-}
-td, th {
-  padding: 4.0pt 8.0pt;
-  font-family: "Times New Roman", SimSun, serif;
-  font-size: 12.0pt;
-}
-code, pre.MsoPre {
-  font-family: Monaco, "Courier New", monospace;
-  font-size: 10.0pt;
-}
-pre.MsoPre {
-  margin: 0cm;
-  padding: 0cm;
-  line-height: 120%;
-}
-</style>
-</head>
-<body>
-<!--StartFragment--><div class="WordSection1">${bodyHtml}</div><!--EndFragment-->
-</body>
-</html>`;
-}
-
-function initCopyHandler() {
-  document.addEventListener("copy", (e) => {
-    const sel = window.getSelection();
-    if (!sel.rangeCount) return;
-
-    const theme = document.body.getAttribute("data-theme");
-    const range = sel.getRangeAt(0);
-    const content = contentEl();
-    if (!content.contains(range.commonAncestorContainer)) return;
-
-    const fragment = range.cloneContents();
-    const wrapper = document.createElement("div");
-    wrapper.appendChild(fragment);
-    prepareCopyFragment(wrapper);
-
-    if (theme === "academic") {
-      prepareAcademicCopyFragment(wrapper);
-      e.clipboardData.setData("text/html", createWordHtml(wrapper.innerHTML));
-    } else {
-      compactCopyFragmentSpacing(wrapper);
-      e.clipboardData.setData("text/html", wrapper.innerHTML);
-    }
-
-    e.clipboardData.setData("text/plain", normalizeCopiedPlainText(sel.toString()));
-    e.preventDefault();
-  });
-}
-
 window.addEventListener("DOMContentLoaded", async () => {
   initI18nControls();
   initTheme();
   initSettingsDialog();
   initTypographySettings();
-  initCopyHandler();
+  initCopyHandler({ contentEl });
   initExportMenu();
   initUnsavedDialog();
   initBackToTopButton();

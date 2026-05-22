@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4 - 2026-05-22
+
+- Added a New Markdown action that opens an untitled editable draft before choosing a save location.
+- Added first-save handling for untitled Markdown drafts, including Markdown file filters and workspace/sidebar tracking after save.
+- Refactored the main frontend entrypoint into focused modules for DOM access, Markdown rendering, editor behavior, image clipboard handling, copy handling, path utilities, and resizable panels.
+- Updated workspace toolbar actions with clearer document, folder, and refresh icons.
+
 ## 0.3.3 - 2026-05-15
 
 - Added interface localization with Chinese and English language options.

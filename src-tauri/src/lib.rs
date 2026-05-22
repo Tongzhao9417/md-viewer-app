@@ -534,6 +534,44 @@ fn save_markdown_file(
     read_md_file(&path_buf)
 }
 
+#[tauri::command]
+fn write_markdown_file(
+    path: String,
+    contents: String,
+    state: tauri::State<AppState>,
+    app: tauri::AppHandle,
+) -> Result<FilePayload, String> {
+    let path_buf = PathBuf::from(&path);
+    if !is_markdown_file(&path_buf) {
+        return Err(format!("Not a Markdown file: {}", path));
+    }
+    if path_buf.exists() && !path_buf.is_file() {
+        return Err(format!("Not a file: {}", path));
+    }
+    if let Some(parent) = path_buf
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        if !parent.exists() {
+            return Err(format!("Directory not found: {}", parent.to_string_lossy()));
+        }
+        if !parent.is_dir() {
+            return Err(format!("Not a directory: {}", parent.to_string_lossy()));
+        }
+    }
+
+    fs::write(&path_buf, contents).map_err(|e| e.to_string())?;
+    *state.current_file.lock().unwrap() = Some(path_buf.clone());
+
+    let mut watched = state.watched_files.lock().unwrap();
+    if !watched.contains(&path_buf) {
+        watched.insert(path_buf.clone());
+        start_watcher(app, path_buf.clone());
+    }
+
+    read_md_file(&path_buf)
+}
+
 #[cfg(target_os = "macos")]
 fn reveal_in_file_manager(path_buf: &Path) -> Result<(), String> {
     let status = Command::new("open")
@@ -688,6 +726,7 @@ pub fn run() {
             read_image_file,
             write_export_file,
             save_markdown_file,
+            write_markdown_file,
             reveal_path,
             open_workspace_in_new_window
         ])

@@ -1,0 +1,12 @@
+export const contentEl = () => document.getElementById("markdown-content");
+export const documentWorkspaceEl = () => document.getElementById("document-workspace");
+export const editorEl = () => document.getElementById("markdown-editor");
+export const emptyEl = () => document.getElementById("empty-state");
+export const tabListEl = () => document.getElementById("tab-list");
+export const themeSelect = () => document.getElementById("theme-select");
+export const languageSelect = () => document.getElementById("settings-language-select");
+export const readerContentEl = () => document.getElementById("reader-content");
+export const backToTopButton = () => document.getElementById("back-to-top-btn");
+export const saveMarkdownButton = () => document.getElementById("save-md-btn");
+export const editorStatusEl = () => document.getElementById("editor-status");
+export const currentThemeId = () => document.body.getAttribute("data-theme") || "default";
